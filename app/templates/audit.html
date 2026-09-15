@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Audit Log — Job Hunter{% endblock %}
+{% block content %}
+<h1>Audit Log</h1>
+<div class="card">
+<table>
+<tr><th>Time</th><th>Entity</th><th>ID</th><th>Action</th><th>Old</th><th>New</th></tr>
+{% for e in events %}
+<tr>
+<td>{{ e.timestamp.strftime('%Y-%m-%d %H:%M') if e.timestamp else '' }}</td>
+<td>{{ e.entity }}</td>
+<td>{{ e.entity_id or '' }}</td>
+<td>{{ e.action }}</td>
+<td>{{ e.old_state or '' }}</td>
+<td>{{ e.new_state or '' }}</td>
+</tr>
+{% endfor %}
+</table>
+</div>
+{% endblock %}

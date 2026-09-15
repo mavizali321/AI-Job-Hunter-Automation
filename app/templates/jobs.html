@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Jobs — Job Hunter{% endblock %}
+{% block content %}
+<h1>Jobs{% if filter_status %} — {{ filter_status }}{% endif %}</h1>
+<div class="card">
+<table>
+<tr><th>ID</th><th>Company</th><th>Title</th><th>Location</th><th>Score</th><th>Decision</th><th>Status</th><th>Source</th></tr>
+{% for j in jobs %}
+<tr>
+<td>{{ j.id }}</td>
+<td>{{ j.company }}</td>
+<td><a href="{{ j.canonical_url }}" target="_blank">{{ j.title }}</a></td>
+<td>{{ j.location or '' }}</td>
+<td>{{ j.score_total|default('—', true) }}</td>
+<td>
+{% if j.decision == 'PRIORITY_APPLY' %}<span class="badge badge-green">PRIORITY</span>
+{% elif j.decision == 'APPLY' %}<span class="badge badge-blue">APPLY</span>
+{% elif j.decision == 'REVIEW' %}<span class="badge badge-yellow">REVIEW</span>
+{% elif j.decision == 'SKIP' %}<span class="badge badge-red">SKIP</span>
+{% else %}<span class="badge badge-gray">{{ j.decision or '—' }}</span>{% endif %}
+</td>
+<td><span class="badge badge-gray">{{ j.status.value if j.status else '' }}</span></td>
+<td>{{ j.source }}</td>
+</tr>
+{% endfor %}
+</table>
+</div>
+{% endblock %}

@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Job Hunter{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+
+<div class="card" style="margin-bottom:1rem;display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+<button id="run-btn" onclick="runJobHunt()" style="padding:0.6rem 1.5rem;font-size:1rem;cursor:pointer;">Run Job Hunt</button>
+<span id="run-status"></span>
+</div>
+
+{% if last_run %}
+<div class="card" style="margin-bottom:1rem;">
+<strong>Last run:</strong> {{ last_run.source }} —
+{{ last_run.status or 'RUNNING' }} —
+{{ last_run.started_at.strftime('%Y-%m-%d %H:%M') if last_run.started_at else '' }}
+{% if last_run.jobs_found is not none %} — Found: {{ last_run.jobs_found }}{% endif %}
+{% if last_run.jobs_new is not none %} — New: {{ last_run.jobs_new }}{% endif %}
+{% if last_run.error %} — Error: {{ last_run.error }}{% endif %}
+</div>
+{% endif %}
+
+<div class="grid">
+<div class="card stat"><div class="num">{{ total_jobs }}</div><div class="label">Total Jobs</div></div>
+<div class="card stat"><div class="num">{{ total_apps }}</div><div class="label">Applications</div></div>
+{% for status, count in by_status.items() %}
+<div class="card stat"><div class="num">{{ count }}</div><div class="label">{{ status }}</div></div>
+{% endfor %}
+</div>
+
+{% if waiting_jobs %}
+<h2>Awaiting Approval</h2>
+<div class="card">
+<table>
+<tr><th>Company</th><th>Role</th><th>Score</th><th>Location</th><th>Ref Code</th><th>WhatsApp</th></tr>
+{% for j in waiting_jobs %}
+<tr>
+<td>{{ j.company }}</td>
+<td>{{ j.title }}</td>
+<td>{{ j.score_total or '' }}</td>
+<td>{{ j.location or '' }}</td>
+<td>
+{% for app in j.applications %}
+{% for appr in app.approvals %}
+{% if appr.decision.value == 'PENDING' %}{{ appr.approval_ref_code or '' }}{% endif %}
+{% endfor %}
+{% endfor %}
+</td>
+<td>
+{% for app in j.applications %}
+{% for appr in app.approvals %}
+{% if appr.whatsapp_delivery_status %}{{ appr.whatsapp_delivery_status }}{% endif %}
+{% endfor %}
+{% endfor %}
+</td>
+</tr>
+{% endfor %}
+</table>
+</div>
+{% endif %}
+
+{% if pending_approvals %}
+<h2>Pending Approvals</h2>
+<div class="card">
+<table>
+<tr><th>Ref</th><th>Channel</th><th>WhatsApp</th><th>Expires</th><th>Actions</th></tr>
+{% for a in pending_approvals %}
+<tr>
+<td>{{ a.approval_ref_code or '' }}</td>
+<td>{{ a.channel.value if a.channel else '' }}</td>
+<td>{{ a.whatsapp_delivery_status or 'N/A' }}</td>
+<td>{{ a.expires_at.strftime('%Y-%m-%d %H:%M') if a.expires_at else '' }}</td>
+<td>
+<a href="/api/approve/{{ a.approval_ref_code or '' }}" style="margin-right:0.5rem;">[Approve]</a>
+<a href="/api/reject/{{ a.approval_ref_code or '' }}">[Reject]</a>
+</td>
+</tr>
+{% endfor %}
+</table>
+</div>
+{% endif %}
+
+{% if blocked_jobs %}
+<h2>Blocked / Manual Action Required</h2>
+<div class="card">
+<table>
+<tr><th>Company</th><th>Role</th><th>Status</th><th>Blockers</th></tr>
+{% for j in blocked_jobs %}
+<tr>
+<td>{{ j.company }}</td>
+<td>{{ j.title }}</td>
+<td>{{ j.status.value if j.status else '' }}</td>
+<td style="font-size:0.85em;">{{ j.verification_blockers or '' }}</td>
+</tr>
+{% endfor %}
+</table>
+</div>
+{% endif %}
+
+<h2>Recent Activity</h2>
+<div class="card">
+<table>
+<tr><th>Time</th><th>Entity</th><th>Action</th><th>Old</th><th>New</th></tr>
+{% for e in recent_events %}
+<tr>
+<td>{{ e.timestamp.strftime('%Y-%m-%d %H:%M') if e.timestamp else '' }}</td>
+<td>{{ e.entity }} #{{ e.entity_id or '' }}</td>
+<td>{{ e.action }}</td>
+<td>{{ e.old_state or '' }}</td>
+<td>{{ e.new_state or '' }}</td>
+</tr>
+{% endfor %}
+</table>
+</div>
+
+<script>
+async function runJobHunt() {
+    const btn = document.getElementById('run-btn');
+    const status = document.getElementById('run-status');
+    btn.disabled = true;
+    status.textContent = 'Running discovery...';
+    try {
+        const resp = await fetch('/api/run', {method: 'POST'});
+        const data = await resp.json();
+        if (data.status === 'ok' && data.discovery) {
+            const d = data.discovery;
+            status.textContent = `Done: ${d.discovered || 0} discovered, ${d.ingested || 0} new, ${d.verified || 0} verified, ${d.blocked || 0} blocked, ${d.shortlisted || 0} shortlisted, ${d.applications_created || 0} apps`;
+        } else {
+            status.textContent = 'Error: ' + JSON.stringify(data);
+        }
+    } catch (e) {
+        status.textContent = 'Error: ' + e.message;
+    } finally {
+        btn.disabled = false;
+    }
+}
+</script>
+{% endblock %}

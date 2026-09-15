@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Review Queue — Job Hunter{% endblock %}
+{% block content %}
+<h1>Review Queue</h1>
+<div class="card">
+<table>
+<tr><th>Company</th><th>Title</th><th>Score</th><th>Location</th><th>Decision</th><th>Status</th></tr>
+{% for j in jobs %}
+<tr>
+<td>{{ j.company }}</td>
+<td><a href="{{ j.canonical_url }}" target="_blank">{{ j.title }}</a></td>
+<td>{{ j.score_total|default('—', true) }}</td>
+<td>{{ j.location or '' }}</td>
+<td>{{ j.decision or '—' }}</td>
+<td><span class="badge badge-gray">{{ j.status.value }}</span></td>
+</tr>
+{% endfor %}
+</table>
+</div>
+{% endblock %}

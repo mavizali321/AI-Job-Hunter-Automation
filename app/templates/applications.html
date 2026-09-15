@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Applications — Job Hunter{% endblock %}
+{% block content %}
+<h1>Applications</h1>
+<div class="card">
+<table>
+<tr><th>ID</th><th>Job ID</th><th>Resume</th><th>State</th><th>Submitted</th><th>Confirmation</th></tr>
+{% for a in applications %}
+<tr>
+<td>{{ a.id }}</td>
+<td>{{ a.job_id }}</td>
+<td>{{ a.resume_variant or '—' }}</td>
+<td><span class="badge badge-gray">{{ a.state.value if a.state else '' }}</span></td>
+<td>{{ a.submitted_at.strftime('%Y-%m-%d %H:%M') if a.submitted_at else '—' }}</td>
+<td>{{ a.confirmation or '—' }}</td>
+</tr>
+{% endfor %}
+</table>
+</div>
+{% endblock %}

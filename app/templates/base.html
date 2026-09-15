@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Job Hunter{% endblock %}</title>
+<style>
+:root { --bg: #f5f5f5; --fg: #222; --card: #fff; --border: #ddd; --accent: #2563eb; --green: #16a34a; --red: #dc2626; --yellow: #ca8a04; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--fg); padding: 16px; max-width: 1200px; margin: 0 auto; }
+nav { display: flex; gap: 12px; flex-wrap: wrap; padding: 12px 0; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+nav a { color: var(--accent); text-decoration: none; font-weight: 500; }
+nav a:hover { text-decoration: underline; }
+h1, h2 { margin-bottom: 12px; }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.stat { text-align: center; }
+.stat .num { font-size: 2em; font-weight: bold; }
+.stat .label { color: #666; font-size: 0.9em; }
+table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+th, td { padding: 8px; text-align: left; border-bottom: 1px solid var(--border); }
+th { background: #f0f0f0; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.8em; font-weight: 600; }
+.badge-green { background: #dcfce7; color: var(--green); }
+.badge-red { background: #fef2f2; color: var(--red); }
+.badge-yellow { background: #fefce8; color: var(--yellow); }
+.badge-blue { background: #dbeafe; color: var(--accent); }
+.badge-gray { background: #f3f4f6; color: #6b7280; }
+.btn { display: inline-block; padding: 6px 16px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.9em; text-decoration: none; }
+.btn-primary { background: var(--accent); color: white; }
+.btn-success { background: var(--green); color: white; }
+.btn-danger { background: var(--red); color: white; }
+</style>
+</head>
+<body>
+<nav>
+<a href="/dashboard">Dashboard</a>
+<a href="/jobs">Jobs</a>
+<a href="/review">Review</a>
+<a href="/approvals">Approvals</a>
+<a href="/applications">Applications</a>
+<a href="/source-runs">Sources</a>
+<a href="/audit">Audit</a>
+<a href="/api/export">Export CSV</a>
+</nav>
+{% block content %}{% endblock %}
+</body>
+</html>

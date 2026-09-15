@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Approvals — Job Hunter{% endblock %}
+{% block content %}
+<h1>Approvals</h1>
+<div class="card">
+<table>
+<tr><th>ID</th><th>App ID</th><th>Channel</th><th>Decision</th><th>Expires</th><th>Decided</th></tr>
+{% for a in approvals %}
+<tr>
+<td>{{ a.id }}</td>
+<td>{{ a.application_id }}</td>
+<td>{{ a.channel.value if a.channel else '' }}</td>
+<td>
+{% if a.decision.value == 'APPROVED' %}<span class="badge badge-green">APPROVED</span>
+{% elif a.decision.value == 'REJECTED' %}<span class="badge badge-red">REJECTED</span>
+{% elif a.decision.value == 'EXPIRED' %}<span class="badge badge-yellow">EXPIRED</span>
+{% else %}<span class="badge badge-blue">PENDING</span>{% endif %}
+</td>
+<td>{{ a.expires_at.strftime('%Y-%m-%d %H:%M') if a.expires_at else '' }}</td>
+<td>{{ a.decided_at.strftime('%Y-%m-%d %H:%M') if a.decided_at else '—' }}</td>
+</tr>
+{% endfor %}
+</table>
+</div>
+{% endblock %}

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Source Runs — Job Hunter{% endblock %}
+{% block content %}
+<h1>Source Runs</h1>
+<div class="card">
+<table>
+<tr><th>ID</th><th>Source</th><th>Started</th><th>Ended</th><th>Found</th><th>New</th><th>Status</th><th>Error</th></tr>
+{% for r in runs %}
+<tr>
+<td>{{ r.id }}</td>
+<td>{{ r.source }}</td>
+<td>{{ r.started_at.strftime('%Y-%m-%d %H:%M') if r.started_at else '' }}</td>
+<td>{{ r.ended_at.strftime('%Y-%m-%d %H:%M') if r.ended_at else '—' }}</td>
+<td>{{ r.jobs_found }}</td>
+<td>{{ r.jobs_new }}</td>
+<td>{{ r.status }}</td>
+<td>{{ r.error or '' }}</td>
+</tr>
+{% endfor %}
+</table>
+</div>
+{% endblock %}
