@@ -1,4 +1,4 @@
-# Maviz AI Job Hunter
+#AI Job Hunter
 
 Hybrid, approval-gated job-hunting automation system. Discovers jobs from ATS APIs, scores them deterministically, routes approvals via WhatsApp, and fills application forms with Playwright.
 
