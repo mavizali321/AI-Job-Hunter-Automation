@@ -55,7 +55,9 @@ class TestStateMachine:
         path = [
             JobStatus.VERIFIED, JobStatus.SCORED, JobStatus.SHORTLISTED,
             JobStatus.WAITING_APPROVAL, JobStatus.APPROVED,
-            JobStatus.PREPARING, JobStatus.READY_TO_SUBMIT, JobStatus.SUBMITTED,
+            JobStatus.PREPARING, JobStatus.READY_TO_SUBMIT,
+            JobStatus.AWAITING_FINAL_APPROVAL, JobStatus.FINAL_APPROVED,
+            JobStatus.SUBMITTED,
         ]
         for next_status in path:
             transition_job(db, job, next_status)

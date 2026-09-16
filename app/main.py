@@ -15,12 +15,18 @@ from itsdangerous import URLSafeTimedSerializer
 
 from app.config import settings
 from app.database import get_db, engine, Base
-from app.models import Job, Application, Approval, Event, SourceRun, JobStatus, ApprovalDecision
+from app.models import (
+    Job, Application, Approval, Event, SourceRun, JobStatus,
+    ApprovalDecision, ApprovalType, SubmissionNonce,
+)
 from app.csv_import import import_csv
 from app.discovery import run_orchestrator
 from app.pipeline import ingest_discovered_job, verify_job, score_and_decide, create_application_for_shortlisted
-from app.approval import create_approval, validate_and_decide, decide_by_ref_code, ApprovalChannel
-from app.state_machine import InvalidTransitionError
+from app.approval import (
+    create_approval, validate_and_decide, decide_by_ref_code, ApprovalChannel,
+    check_dual_approval, create_submission_nonce, consume_submission_nonce,
+)
+from app.state_machine import transition_job, InvalidTransitionError
 
 app = FastAPI(title="Maviz AI Job Hunter", version="1.0.0")
 
@@ -30,15 +36,21 @@ templates = Jinja2Templates(directory=str(templates_dir))
 
 signer = URLSafeTimedSerializer(settings.secret_key)
 
-CSRF_TOKEN_FIELD = "csrf_token"
+CSRF_COOKIE_NAME = "csrf_token"
+VALID_OUTCOMES = {"CONFIRMED", "UNCERTAIN", "MANUAL_ACTION_REQUIRED", "FAILED"}
 
 
-def _generate_csrf() -> str:
-    return secrets.token_urlsafe(32)
+def _set_csrf_cookie(response, token: str):
+    response.set_cookie(
+        CSRF_COOKIE_NAME, token,
+        httponly=True, samesite="strict", max_age=86400,
+    )
 
 
-def _verify_csrf(request_token: str, session_token: str) -> bool:
-    return hmac.compare_digest(request_token, session_token)
+def _verify_csrf(form_token: str, cookie_token: str) -> bool:
+    if not form_token or not cookie_token:
+        return False
+    return hmac.compare_digest(form_token, cookie_token)
 
 
 def _check_auth(request: Request):
@@ -106,10 +118,13 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         .order_by(Approval.created_at.desc()).limit(10).all()
     )
     waiting_jobs = (
-        db.query(Job).filter(Job.status == JobStatus.WAITING_APPROVAL)
+        db.query(Job).filter(Job.status.in_([
+            JobStatus.WAITING_APPROVAL, JobStatus.AWAITING_FINAL_APPROVAL,
+        ]))
         .order_by(Job.score_total.desc()).limit(10).all()
     )
-    return templates.TemplateResponse(request=request, name="dashboard.html", context={
+    csrf = secrets.token_urlsafe(32)
+    resp = templates.TemplateResponse(request=request, name="dashboard.html", context={
         "total_jobs": total_jobs,
         "by_status": by_status,
         "total_apps": total_apps,
@@ -118,8 +133,10 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         "blocked_jobs": blocked_jobs,
         "pending_approvals": pending_approvals,
         "waiting_jobs": waiting_jobs,
-        "csrf_token": _generate_csrf(),
+        "csrf_token": csrf,
     })
+    _set_csrf_cookie(resp, csrf)
+    return resp
 
 
 @app.get("/jobs", response_class=HTMLResponse)
@@ -204,6 +221,38 @@ def api_reject(token: str, db: Session = Depends(get_db)):
     return {"status": "rejected", "message": msg}
 
 
+@app.post("/api/approve-ref/{ref_code}")
+def api_approve_by_ref(
+    ref_code: str, request: Request,
+    csrf_token: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    _check_auth(request)
+    cookie_csrf = request.cookies.get(CSRF_COOKIE_NAME, "")
+    if not _verify_csrf(csrf_token, cookie_csrf):
+        raise HTTPException(status_code=403, detail="CSRF validation failed")
+    success, msg = decide_by_ref_code(db, ref_code, ApprovalDecision.APPROVED)
+    if not success:
+        raise HTTPException(status_code=400, detail=msg)
+    return RedirectResponse(url="/dashboard", status_code=303)
+
+
+@app.post("/api/reject-ref/{ref_code}")
+def api_reject_by_ref(
+    ref_code: str, request: Request,
+    csrf_token: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    _check_auth(request)
+    cookie_csrf = request.cookies.get(CSRF_COOKIE_NAME, "")
+    if not _verify_csrf(csrf_token, cookie_csrf):
+        raise HTTPException(status_code=403, detail="CSRF validation failed")
+    success, msg = decide_by_ref_code(db, ref_code, ApprovalDecision.REJECTED)
+    if not success:
+        raise HTTPException(status_code=400, detail=msg)
+    return RedirectResponse(url="/dashboard", status_code=303)
+
+
 @app.get("/api/export")
 def export_csv(request: Request, db: Session = Depends(get_db)):
     _check_auth(request)
@@ -244,6 +293,12 @@ async def whatsapp_webhook(request: Request, db: Session = Depends(get_db)):
     body = await request.body()
     data = await request.json()
 
+    if settings.whatsapp_app_secret:
+        from app.whatsapp import WhatsAppClient
+        sig = request.headers.get("X-Hub-Signature-256", "")
+        if not WhatsAppClient.verify_webhook_signature(body, sig, settings.whatsapp_app_secret):
+            raise HTTPException(status_code=403, detail="Invalid webhook signature")
+
     from app.whatsapp import WhatsAppClient
     msg = WhatsAppClient.parse_webhook_message(data)
     if not msg:
@@ -275,7 +330,7 @@ async def whatsapp_webhook(request: Request, db: Session = Depends(get_db)):
     return {"status": "processed", "decision": decision_text}
 
 
-# --- Worker Endpoint ---
+# --- Worker Endpoints ---
 
 @app.get("/api/worker/jobs")
 def worker_pending_jobs(request: Request, db: Session = Depends(get_db)):
@@ -284,7 +339,7 @@ def worker_pending_jobs(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=403, detail="Invalid worker token")
     jobs = (
         db.query(Job)
-        .filter(Job.status == JobStatus.READY_TO_SUBMIT)
+        .filter(Job.status == JobStatus.FINAL_APPROVED)
         .order_by(Job.score_total.desc())
         .limit(10)
         .all()
@@ -301,12 +356,113 @@ def worker_pending_jobs(request: Request, db: Session = Depends(get_db)):
     ]
 
 
-@app.post("/api/worker/submit/{job_id}")
-def worker_submit_result(job_id: int, request: Request, db: Session = Depends(get_db)):
+@app.post("/api/worker/authorize/{job_id}")
+async def worker_authorize(job_id: int, request: Request, db: Session = Depends(get_db)):
     token = request.headers.get("X-Worker-Token", "")
     if not hmac.compare_digest(token, settings.worker_token):
         raise HTTPException(status_code=403, detail="Invalid worker token")
+
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    return {"status": "ok", "job_id": job.id}
+
+    if job.status != JobStatus.FINAL_APPROVED:
+        raise HTTPException(status_code=400, detail=f"Job not in FINAL_APPROVED state (current: {job.status.value})")
+
+    application = db.query(Application).filter(Application.job_id == job.id).first()
+    if not application:
+        raise HTTPException(status_code=404, detail="Application not found")
+
+    if not check_dual_approval(db, application.id):
+        raise HTTPException(status_code=400, detail="Dual approval not satisfied")
+
+    if not application.manifest_hash:
+        raise HTTPException(status_code=400, detail="No manifest hash on application")
+
+    body = await request.json()
+    incoming_hash = body.get("manifest_hash", "")
+    if incoming_hash and incoming_hash != application.manifest_hash:
+        raise HTTPException(status_code=400, detail="Manifest hash mismatch — content changed")
+
+    nonce_value, nonce_hash = create_submission_nonce(db, application, application.manifest_hash)
+    return {"nonce": nonce_value, "manifest_hash": nonce_hash, "job_id": job.id}
+
+
+@app.post("/api/worker/submit/{job_id}")
+async def worker_submit_result(job_id: int, request: Request, db: Session = Depends(get_db)):
+    token = request.headers.get("X-Worker-Token", "")
+    if not hmac.compare_digest(token, settings.worker_token):
+        raise HTTPException(status_code=403, detail="Invalid worker token")
+
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.status != JobStatus.FINAL_APPROVED:
+        raise HTTPException(status_code=400, detail=f"Job not in FINAL_APPROVED state (current: {job.status.value})")
+
+    body = await request.json()
+    nonce_value = body.get("nonce", "")
+    manifest_hash = body.get("manifest_hash", "")
+    outcome = body.get("outcome", "")
+    confirmation_ref = body.get("confirmation_reference", "")
+    screenshot_path = body.get("screenshot_path", "")
+
+    if outcome not in VALID_OUTCOMES:
+        raise HTTPException(status_code=400, detail=f"Unknown outcome: {outcome}")
+
+    application = db.query(Application).filter(Application.job_id == job.id).first()
+    if not application:
+        raise HTTPException(status_code=404, detail="Application not found")
+
+    if application.manifest_hash and manifest_hash and application.manifest_hash != manifest_hash:
+        raise HTTPException(status_code=400, detail="Manifest hash mismatch — content changed")
+
+    if not nonce_value:
+        raise HTTPException(status_code=400, detail="Submission nonce required")
+
+    ok, nonce_msg = consume_submission_nonce(db, nonce_value, manifest_hash, application.id)
+    if not ok:
+        raise HTTPException(status_code=400, detail=nonce_msg)
+
+    if outcome == "CONFIRMED":
+        application.attempt_status = "CONFIRMED"
+        application.confirmation_reference = confirmation_ref
+        application.screenshot_path = screenshot_path
+        application.submitted_at = datetime.now(timezone.utc)
+        application.confirmation = f"Submitted: {confirmation_ref}"
+        try:
+            transition_job(db, job, JobStatus.SUBMITTED, {"confirmation": confirmation_ref})
+            application.state = JobStatus.SUBMITTED
+        except InvalidTransitionError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    elif outcome == "UNCERTAIN":
+        application.attempt_status = "UNCERTAIN"
+        application.confirmation_reference = confirmation_ref
+        application.screenshot_path = screenshot_path
+        try:
+            transition_job(db, job, JobStatus.MANUAL_ACTION_REQUIRED, {"reason": "uncertain_submission"})
+            application.state = JobStatus.MANUAL_ACTION_REQUIRED
+        except InvalidTransitionError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    elif outcome == "MANUAL_ACTION_REQUIRED":
+        reason = body.get("reason", "Manual action needed")
+        application.attempt_status = "MANUAL_ACTION_REQUIRED"
+        application.failure_reason = reason
+        try:
+            transition_job(db, job, JobStatus.MANUAL_ACTION_REQUIRED, {"reason": reason})
+            application.state = JobStatus.MANUAL_ACTION_REQUIRED
+        except InvalidTransitionError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    elif outcome == "FAILED":
+        reason = body.get("reason", "Submission failed")
+        application.attempt_status = "FAILED"
+        application.failure_reason = reason
+        try:
+            transition_job(db, job, JobStatus.FAILED, {"reason": reason})
+            application.state = JobStatus.FAILED
+        except InvalidTransitionError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    db.commit()
+    return {"status": "ok", "job_id": job.id, "outcome": outcome}

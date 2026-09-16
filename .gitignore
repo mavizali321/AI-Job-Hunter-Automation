@@ -1,4 +1,5 @@
 .env
+.env.old
 *.db
 __pycache__/
 *.pyc
@@ -10,3 +11,7 @@ dist/
 build/
 test_api.db
 venv/
+screenshots/
+*.zip
+*.rar
+.git/

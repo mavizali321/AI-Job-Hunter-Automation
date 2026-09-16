@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head><title>Apply — LLM Engineer at LeverCo</title></head>
+<body>
+<h1>LLM Engineer — LeverCo</h1>
+<form id="application_form" method="post" action="/submit">
+  <label for="name">Full Name</label>
+  <input type="text" name="name" id="name" required>
+
+  <label for="email">Email</label>
+  <input type="email" name="email" id="email" required>
+
+  <label for="phone">Phone</label>
+  <input type="tel" name="phone" id="phone">
+
+  <label for="linkedin">LinkedIn</label>
+  <input type="url" name="urls[LinkedIn]" id="linkedin">
+
+  <label for="resume">Resume/CV</label>
+  <input type="file" name="resume" id="resume" accept=".pdf,.doc,.docx">
+
+  <button type="submit" class="postings-btn-submit">Submit Application</button>
+</form>
+<div id="confirmation" style="display:none;">
+  <h2>Application received!</h2>
+  <p>We received your application and will be in touch.</p>
+</div>
+<script>
+document.getElementById('application_form').addEventListener('submit', function(e) {
+  e.preventDefault();
+  this.style.display = 'none';
+  document.getElementById('confirmation').style.display = 'block';
+});
+</script>
+</body>
+</html>

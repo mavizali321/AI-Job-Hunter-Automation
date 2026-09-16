@@ -70,9 +70,34 @@
 <td>{{ a.whatsapp_delivery_status or 'N/A' }}</td>
 <td>{{ a.expires_at.strftime('%Y-%m-%d %H:%M') if a.expires_at else '' }}</td>
 <td>
-<a href="/api/approve/{{ a.approval_ref_code or '' }}" style="margin-right:0.5rem;">[Approve]</a>
-<a href="/api/reject/{{ a.approval_ref_code or '' }}">[Reject]</a>
+<form method="post" action="/api/approve-ref/{{ a.approval_ref_code or '' }}" style="display:inline;">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<button type="submit" style="cursor:pointer;">[Approve]</button>
+</form>
+<form method="post" action="/api/reject-ref/{{ a.approval_ref_code or '' }}" style="display:inline;">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<button type="submit" style="cursor:pointer;">[Reject]</button>
+</form>
 </td>
+</tr>
+{% endfor %}
+</table>
+</div>
+{% endif %}
+
+{% if waiting_jobs %}
+<h2>Awaiting Approval — Details</h2>
+<div class="card">
+<table>
+<tr><th>Company</th><th>Role</th><th>Score</th><th>Discovery</th><th>Official URL</th><th>Verification</th></tr>
+{% for j in waiting_jobs %}
+<tr>
+<td>{{ j.company }}</td>
+<td>{{ j.title }}</td>
+<td>{{ j.score_total or '' }}</td>
+<td style="font-size:0.85em;">{{ j.discovery_source or j.source }}{% if j.discovery_url %}<br><a href="{{ j.discovery_url }}" target="_blank" rel="noopener">source</a>{% endif %}</td>
+<td style="font-size:0.85em;">{% if j.official_url %}<a href="{{ j.official_url }}" target="_blank" rel="noopener">{{ j.official_url_method or 'official' }}</a>{% else %}{{ j.canonical_url[:60] }}{% endif %}</td>
+<td style="font-size:0.85em;">{% if j.verification_evidence %}{{ j.verification_evidence.get('adapter', '') }}{% endif %}</td>
 </tr>
 {% endfor %}
 </table>
@@ -83,12 +108,14 @@
 <h2>Blocked / Manual Action Required</h2>
 <div class="card">
 <table>
-<tr><th>Company</th><th>Role</th><th>Status</th><th>Blockers</th></tr>
+<tr><th>Company</th><th>Role</th><th>Status</th><th>Discovery</th><th>Official URL</th><th>Blockers</th></tr>
 {% for j in blocked_jobs %}
 <tr>
 <td>{{ j.company }}</td>
 <td>{{ j.title }}</td>
 <td>{{ j.status.value if j.status else '' }}</td>
+<td style="font-size:0.85em;">{{ j.discovery_source or j.source }}</td>
+<td style="font-size:0.85em;">{% if j.official_url %}<a href="{{ j.official_url }}" target="_blank" rel="noopener">{{ j.official_url_method or 'link' }}</a>{% elif j.official_url_method == 'unresolved' %}unresolved{% else %}—{% endif %}</td>
 <td style="font-size:0.85em;">{{ j.verification_blockers or '' }}</td>
 </tr>
 {% endfor %}
@@ -123,7 +150,10 @@ async function runJobHunt() {
         const data = await resp.json();
         if (data.status === 'ok' && data.discovery) {
             const d = data.discovery;
-            status.textContent = `Done: ${d.discovered || 0} discovered, ${d.ingested || 0} new, ${d.verified || 0} verified, ${d.blocked || 0} blocked, ${d.shortlisted || 0} shortlisted, ${d.applications_created || 0} apps`;
+            let msg = `Done: ${d.discovered || 0} discovered, ${d.ingested || 0} new, ${d.verified || 0} verified, ${d.blocked || 0} blocked, ${d.shortlisted || 0} shortlisted, ${d.applications_created || 0} apps`;
+            if (d.skipped_aggregator) msg += `, ${d.skipped_aggregator} aggregator-only`;
+            if (d.adapter_errors && Object.keys(d.adapter_errors).length) msg += ` | Errors: ${Object.keys(d.adapter_errors).join(', ')}`;
+            status.textContent = msg;
         } else {
             status.textContent = 'Error: ' + JSON.stringify(data);
         }

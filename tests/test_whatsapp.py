@@ -37,15 +37,35 @@ class TestWebhookParsing:
 class TestApprovalResponse:
     def test_approve_variants(self):
         for text in ["APPROVE", "yes", "Y", "approved", "ok"]:
-            assert WhatsAppClient.parse_approval_response(text) == "APPROVED"
+            decision, ref_code = WhatsAppClient.parse_approval_response(text)
+            assert decision == "APPROVED"
+            assert ref_code is None
 
     def test_reject_variants(self):
         for text in ["REJECT", "no", "N", "rejected", "decline"]:
-            assert WhatsAppClient.parse_approval_response(text) == "REJECTED"
+            decision, ref_code = WhatsAppClient.parse_approval_response(text)
+            assert decision == "REJECTED"
+            assert ref_code is None
+
+    def test_approve_with_ref_code(self):
+        decision, ref_code = WhatsAppClient.parse_approval_response("APPROVE ABC12345")
+        assert decision == "APPROVED"
+        assert ref_code == "ABC12345"
+
+    def test_reject_with_ref_code(self):
+        decision, ref_code = WhatsAppClient.parse_approval_response("REJECT XYZ99999")
+        assert decision == "REJECTED"
+        assert ref_code == "XYZ99999"
 
     def test_unknown(self):
-        assert WhatsAppClient.parse_approval_response("maybe") is None
-        assert WhatsAppClient.parse_approval_response("") is None
+        decision, ref_code = WhatsAppClient.parse_approval_response("maybe")
+        assert decision is None
+        assert ref_code is None
+
+    def test_empty(self):
+        decision, ref_code = WhatsAppClient.parse_approval_response("")
+        assert decision is None
+        assert ref_code is None
 
 
 class TestIdempotency:

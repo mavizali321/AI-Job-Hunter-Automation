@@ -21,6 +21,8 @@ class JobStatus(str, enum.Enum):
     APPROVED = "APPROVED"
     PREPARING = "PREPARING"
     READY_TO_SUBMIT = "READY_TO_SUBMIT"
+    AWAITING_FINAL_APPROVAL = "AWAITING_FINAL_APPROVAL"
+    FINAL_APPROVED = "FINAL_APPROVED"
     SUBMITTED = "SUBMITTED"
     REJECTED = "REJECTED"
     SKIPPED = "SKIPPED"
@@ -40,6 +42,11 @@ class ApprovalDecision(str, enum.Enum):
 class ApprovalChannel(str, enum.Enum):
     WHATSAPP = "WHATSAPP"
     DASHBOARD = "DASHBOARD"
+
+
+class ApprovalType(str, enum.Enum):
+    FIRST = "FIRST"
+    FINAL = "FINAL"
 
 
 class AnswerSensitivity(str, enum.Enum):
@@ -69,6 +76,10 @@ class Job(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     canonical_url = Column(String(2048), nullable=False, index=True)
+    discovery_url = Column(String(2048), nullable=True)
+    discovery_source = Column(String(100), nullable=True)
+    official_url = Column(String(2048), nullable=True)
+    official_url_method = Column(String(50), nullable=True)
     source = Column(String(100), nullable=False)
     external_id = Column(String(500), nullable=True)
     requisition_id = Column(String(500), nullable=True)
@@ -120,9 +131,13 @@ class Application(Base):
     resume_variant = Column(String(500), nullable=True)
     answer_set_version = Column(String(100), nullable=True)
     approval_version = Column(String(100), nullable=True)
+    manifest_hash = Column(String(64), nullable=True)
     state = Column(Enum(JobStatus), nullable=False, default=JobStatus.WAITING_APPROVAL)
     submitted_at = Column(DateTime(timezone=True), nullable=True)
     confirmation = Column(Text, nullable=True)
+    confirmation_reference = Column(String(500), nullable=True)
+    screenshot_path = Column(String(500), nullable=True)
+    attempt_status = Column(String(50), nullable=True)
     failure_reason = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
@@ -138,6 +153,7 @@ class Approval(Base):
     application_id = Column(Integer, ForeignKey("applications.id"), nullable=False)
     token_hash = Column(String(64), nullable=False, unique=True)
     channel = Column(Enum(ApprovalChannel), nullable=False)
+    approval_type = Column(Enum(ApprovalType), nullable=False, default=ApprovalType.FIRST)
     decision = Column(Enum(ApprovalDecision), nullable=False, default=ApprovalDecision.PENDING)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     decided_at = Column(DateTime(timezone=True), nullable=True)
@@ -147,6 +163,19 @@ class Approval(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow)
 
     application = relationship("Application", back_populates="approvals")
+
+
+class SubmissionNonce(Base):
+    __tablename__ = "submission_nonces"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    application_id = Column(Integer, ForeignKey("applications.id"), nullable=False, unique=True)
+    nonce = Column(String(64), nullable=False, unique=True, index=True)
+    manifest_hash = Column(String(64), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    consumed = Column(Boolean, default=False, nullable=False)
+    consumed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
 
 
 class CandidateAnswer(Base):

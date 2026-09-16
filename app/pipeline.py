@@ -252,4 +252,49 @@ def prepare_application(db: Session, job: Job, application: Application) -> Path
     transition_job(db, job, JobStatus.READY_TO_SUBMIT)
     application.state = JobStatus.READY_TO_SUBMIT
     db.commit()
+
+    result = _send_final_approval(db, job, application, snapshot, answers)
+
+    transition_job(db, job, JobStatus.AWAITING_FINAL_APPROVAL)
+    application.state = JobStatus.AWAITING_FINAL_APPROVAL
+    db.commit()
+
     return app_dir
+
+
+def _send_final_approval(db: Session, job: Job, application: Application, snapshot: dict, answers: dict) -> dict:
+    """Auto-create second (final) approval after preparation and send WhatsApp."""
+    from app.approval import create_final_approval, ApprovalChannel
+    from app.whatsapp import WhatsAppClient
+    from local_worker.worker import SubmissionGuard
+
+    guard = SubmissionGuard()
+    manifest_hash = guard.compute_manifest_hash(
+        snapshot, application.resume_variant or "profile/Maviz-Ali-Resume-Original.pdf", answers,
+    )
+
+    client = WhatsAppClient()
+    channel = ApprovalChannel.WHATSAPP if client.configured else ApprovalChannel.DASHBOARD
+
+    approval, token = create_final_approval(db, application, job, manifest_hash, channel=channel)
+
+    if client.configured:
+        try:
+            result = client.send_approval_message_sync(
+                company=job.company,
+                role=job.title,
+                location=job.location or "",
+                score=job.score_total or 0,
+                url=job.canonical_url,
+                ref_code=approval.approval_ref_code,
+                approval_type="final",
+                manifest_hash=manifest_hash,
+            )
+            approval.whatsapp_delivery_status = "sent"
+            db.commit()
+            return {"status": "sent", "ref_code": approval.approval_ref_code, "whatsapp": result}
+        except Exception as e:
+            approval.whatsapp_delivery_status = f"failed: {str(e)[:80]}"
+            db.commit()
+            return {"status": "whatsapp_failed", "ref_code": approval.approval_ref_code, "error": str(e)}
+    return {"status": "dashboard_only", "ref_code": approval.approval_ref_code}

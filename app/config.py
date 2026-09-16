@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     whatsapp_access_token: str = ""
     whatsapp_verify_token: str = "change-me"
     whatsapp_recipient: str = ""
+    whatsapp_app_secret: str = ""
 
     llm_api_key: str = ""
     llm_base_url: str = "https://api.openai.com/v1"
@@ -28,6 +29,14 @@ class Settings(BaseSettings):
     lever_company_slugs: str = ""
     ashby_company_slugs: str = ""
     career_page_urls: str = ""
+
+    serper_api_key: str = ""
+    adzuna_app_id: str = ""
+    adzuna_api_key: str = ""
+
+    job_titles: str = ""
+    job_locations: str = "Karachi,Islamabad,Lahore,Pakistan,Remote"
+    max_results_per_run: int = 100
 
     resume_checksum: str = "E47DD0E6E27E3FE906630219A1CA44D450BE5DC2F07186FF8637D17CCE59DD4E"
 
@@ -51,6 +60,21 @@ class Settings(BaseSettings):
     @property
     def career_urls_list(self) -> list[str]:
         return self._split_csv(self.career_page_urls)
+
+    @property
+    def job_titles_list(self) -> list[str]:
+        custom = self._split_csv(self.job_titles)
+        if custom:
+            return custom
+        return [
+            "AI Engineer", "Junior AI Engineer", "Applied AI Engineer",
+            "LLM Engineer", "AI Automation Engineer", "Python Developer",
+            "Software Engineer", "SAP ABAP Developer", "Junior Technical Consultant",
+        ]
+
+    @property
+    def job_locations_list(self) -> list[str]:
+        return self._split_csv(self.job_locations)
 
 
 settings = Settings()

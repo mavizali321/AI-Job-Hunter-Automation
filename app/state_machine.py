@@ -29,6 +29,14 @@ VALID_TRANSITIONS: dict[JobStatus, set[JobStatus]] = {
         JobStatus.MANUAL_ACTION_REQUIRED,
     },
     JobStatus.READY_TO_SUBMIT: {
+        JobStatus.AWAITING_FINAL_APPROVAL, JobStatus.FAILED, JobStatus.BLOCKED,
+        JobStatus.MANUAL_ACTION_REQUIRED,
+    },
+    JobStatus.AWAITING_FINAL_APPROVAL: {
+        JobStatus.FINAL_APPROVED, JobStatus.REJECTED, JobStatus.EXPIRED,
+        JobStatus.MANUAL_ACTION_REQUIRED,
+    },
+    JobStatus.FINAL_APPROVED: {
         JobStatus.SUBMITTED, JobStatus.FAILED, JobStatus.BLOCKED,
         JobStatus.MANUAL_ACTION_REQUIRED,
     },
@@ -42,6 +50,7 @@ VALID_TRANSITIONS: dict[JobStatus, set[JobStatus]] = {
     JobStatus.MANUAL_ACTION_REQUIRED: {
         JobStatus.PREPARING, JobStatus.READY_TO_SUBMIT, JobStatus.SCORED,
         JobStatus.BLOCKED, JobStatus.SKIPPED, JobStatus.VERIFIED,
+        JobStatus.AWAITING_FINAL_APPROVAL,
     },
     JobStatus.FAILED: {
         JobStatus.DISCOVERED, JobStatus.PREPARING, JobStatus.READY_TO_SUBMIT,

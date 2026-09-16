@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head><title>Apply — Engineer at CaptchaCo</title></head>
+<body>
+<h1>Apply for Engineer</h1>
+<form id="application_form" method="post" action="/submit">
+  <label for="name">Name</label>
+  <input type="text" name="name" id="name" required>
+
+  <label for="email">Email</label>
+  <input type="email" name="email" id="email" required>
+
+  <div class="captcha" id="captcha-widget">
+    <p>Please verify you are human</p>
+    <input type="checkbox" name="captcha_verified" id="captcha_verified">
+  </div>
+
+  <button type="submit">Submit</button>
+</form>
+</body>
+</html>
