@@ -79,14 +79,14 @@ class TestBuildAdapters:
 
 class TestDiscoverAll:
     def test_empty_adapters(self):
-        jobs, errors = asyncio.run(discover_all([], search_providers=[]))
+        jobs, errors, _diag = asyncio.run(discover_all([], search_providers=[]))
         assert jobs == []
         assert errors == {}
 
     def test_collects_jobs_from_multiple_adapters(self):
         a1 = FakeAdapter(jobs=[_make_job(company="A")])
         a2 = FakeAdapter(jobs=[_make_job(company="B"), _make_job(company="C")])
-        jobs, errors = asyncio.run(discover_all([a1, a2], search_providers=[]))
+        jobs, errors, _diag = asyncio.run(discover_all([a1, a2], search_providers=[]))
         assert len(jobs) == 3
         assert errors == {}
 
@@ -94,7 +94,7 @@ class TestDiscoverAll:
         good = FakeAdapter(jobs=[_make_job()])
         bad = FakeAdapter(fail=True)
         bad.name = "broken"
-        jobs, errors = asyncio.run(discover_all([good, bad], search_providers=[]))
+        jobs, errors, _diag = asyncio.run(discover_all([good, bad], search_providers=[]))
         assert len(jobs) == 1
         assert "broken" in errors
 

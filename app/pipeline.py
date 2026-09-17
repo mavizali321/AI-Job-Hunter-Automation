@@ -23,7 +23,7 @@ CLOSED_MARKERS = [
 ]
 
 PAKISTAN_MARKERS = {"pakistan", "karachi", "lahore", "islamabad"}
-REMOTE_MARKERS = {"remote", "worldwide", "global", "anywhere"}
+REMOTE_WORLDWIDE_MARKERS = {"worldwide", "global", "anywhere", "all countries"}
 
 
 def ingest_discovered_job(
@@ -78,10 +78,39 @@ def ingest_discovered_job(
     return job
 
 
+JOB_CONTENT_MARKERS = [
+    "apply", "responsibilities", "qualifications", "requirements",
+    "experience", "about the role", "job description", "what you",
+    "salary", "benefits", "who you are", "we are looking",
+]
+
+JOB_URL_PATTERNS = [
+    r"/jobs?/\d+", r"/jobs?/[a-f0-9-]{8,}", r"/careers?/\d+",
+    r"/positions?/\d+", r"/openings?/\d+", r"/apply/",
+    r"greenhouse\.io/[^/]+/jobs/\d+",
+    r"lever\.co/[^/]+/[a-f0-9-]{8,}",
+    r"ashbyhq\.com/[^/]+/[a-f0-9-]{8,}",
+    r"workday\.com/.+/job/",
+    r"smartrecruiters\.com/.+/\d+",
+]
+
+GENERIC_PAGE_PATTERNS = [
+    r"^https?://[^/]+/?$",
+    r"^https?://[^/]+/careers/?$",
+    r"^https?://[^/]+/careers/?#",
+    r"^https?://[^/]+/jobs/?$",
+    r"^https?://boards\.greenhouse\.io/[^/]+/?$",
+    r"^https?://jobs\.lever\.co/[^/]+/?$",
+    r"^https?://jobs\.ashbyhq\.com/[^/]+/?$",
+]
+
+
 def collect_verification_evidence(url: str, posted_date: datetime | None,
                                   location: str, description: str,
                                   verified_content: str | None = None,
-                                  http_success: bool = False) -> dict:
+                                  http_success: bool = False,
+                                  discovered_title: str = "",
+                                  discovered_company: str = "") -> dict:
     evidence = {"verified_at": datetime.now(timezone.utc).isoformat()}
 
     evidence["http_success"] = http_success
@@ -92,9 +121,30 @@ def collect_verification_evidence(url: str, posted_date: datetime | None,
     )
 
     content = verified_content or description or ""
+    content_lower = content.lower()
+
     evidence["has_content"] = len(content.strip()) > 50
 
-    content_lower = content.lower()
+    evidence["has_substantial_content"] = (
+        len(content.strip()) > 200
+        and sum(1 for m in JOB_CONTENT_MARKERS if m in content_lower) >= 2
+    )
+
+    import re
+    evidence["is_job_specific_url"] = bool(
+        any(re.search(p, url, re.I) for p in JOB_URL_PATTERNS)
+    )
+    evidence["is_generic_page"] = bool(
+        any(re.search(p, url.rstrip("/") + "/", re.I) for p in GENERIC_PAGE_PATTERNS)
+    )
+
+    title_tokens = [t.lower() for t in (discovered_title or "").split() if len(t) > 2]
+    company_lower = (discovered_company or "").lower().strip()
+    evidence["title_match"] = bool(
+        title_tokens and sum(1 for t in title_tokens if t in content_lower) >= max(1, len(title_tokens) // 2)
+    )
+    evidence["company_match"] = bool(company_lower and company_lower in content_lower)
+
     evidence["listing_closed"] = any(m in content_lower for m in CLOSED_MARKERS)
 
     evidence["has_posted_date"] = posted_date is not None
@@ -102,7 +152,7 @@ def collect_verification_evidence(url: str, posted_date: datetime | None,
     all_text = content_lower + " " + (location or "").lower()
     evidence["location_eligible"] = (
         any(m in all_text for m in PAKISTAN_MARKERS) or
-        any(m in all_text for m in REMOTE_MARKERS)
+        any(m in all_text for m in REMOTE_WORLDWIDE_MARKERS)
     )
 
     return evidence
@@ -116,6 +166,16 @@ def compute_verification_blockers(evidence: dict) -> list[str]:
         blockers.append("URL is not an official company/ATS page")
     if not evidence.get("has_content"):
         blockers.append("No job content found at URL")
+    if evidence.get("is_generic_page"):
+        blockers.append("URL is a generic careers/board page, not a specific job listing")
+    if evidence.get("http_success") and not evidence.get("has_substantial_content", True):
+        blockers.append("Page lacks substantial job content (generic careers page?)")
+    if evidence.get("http_success") and not evidence.get("title_match", True):
+        blockers.append("Discovered job title not found on official page")
+    if evidence.get("http_success") and not evidence.get("company_match", True):
+        blockers.append("Discovered company name not found on official page")
+    if evidence.get("http_success") and not evidence.get("is_job_specific_url", True):
+        blockers.append("URL does not appear to be a specific job listing")
     if evidence.get("listing_closed"):
         blockers.append("Listing appears closed or expired")
     if not evidence.get("has_posted_date"):
@@ -209,16 +269,29 @@ def create_application_for_shortlisted(db: Session, job: Job) -> Application | N
     return application
 
 
+PREPARATION_ELIGIBLE = {
+    JobStatus.APPROVED, JobStatus.FAILED,
+    JobStatus.MANUAL_ACTION_REQUIRED, JobStatus.BLOCKED,
+}
+
+
+def application_slug(company: str, title: str, application_id: int | None = None) -> str:
+    base = f"{company}-{title}".lower().replace(" ", "-")[:60]
+    if application_id is not None:
+        return f"{base}-app-{application_id}"
+    return base
+
+
 def prepare_application(db: Session, job: Job, application: Application) -> Path | None:
-    if job.status != JobStatus.APPROVED:
+    if job.status not in PREPARATION_ELIGIBLE:
         return None
 
     transition_job(db, job, JobStatus.PREPARING)
     application.state = JobStatus.PREPARING
     db.commit()
 
-    slug = f"{job.company}-{job.title}".lower().replace(" ", "-")[:60]
-    app_dir = Path("applications") / slug
+    slug = application_slug(job.company, job.title, application.id)
+    app_dir = Path(settings.applications_dir) / slug
     app_dir.mkdir(parents=True, exist_ok=True)
 
     snapshot = {
@@ -226,11 +299,16 @@ def prepare_application(db: Session, job: Job, application: Application) -> Path
         "company": job.company,
         "title": job.title,
         "location": job.location,
-        "url": job.canonical_url,
+        "url": job.official_url or job.canonical_url,
         "score": job.score_total,
         "decision": job.decision,
         "description": (job.description or "")[:2000],
         "requirements": job.requirements,
+        "match_score": job.match_score,
+        "matched_skills": job.matched_skills,
+        "missing_skills": job.missing_skills,
+        "seniority_fit": job.seniority_fit,
+        "location_fit_detail": job.location_fit_detail,
         "prepared_at": datetime.now(timezone.utc).isoformat(),
     }
     (app_dir / "job_snapshot.json").write_text(json.dumps(snapshot, indent=2))

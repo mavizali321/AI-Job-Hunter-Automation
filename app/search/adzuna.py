@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import httpx
 
 from app.search.base import SearchProvider, SearchResult
+from app.search.retry import request_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -38,11 +39,11 @@ class AdzunaProvider(SearchProvider):
             params["where"] = location
 
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(
+            resp = await request_with_retry(
+                client, "get",
                 f"{ADZUNA_ENDPOINT}/{self.country}/search/1",
                 params=params,
             )
-            resp.raise_for_status()
             data = resp.json()
 
         for item in data.get("results", [])[:max_results]:

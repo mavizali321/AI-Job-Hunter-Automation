@@ -108,17 +108,38 @@ def _extract_apply_link(html: str, company: str) -> str | None:
 
 async def _search_ats_direct(company: str, title: str) -> str | None:
     slug = re.sub(r'[^a-z0-9]', '', company.lower())
-    ats_urls = [
-        f"https://boards.greenhouse.io/{slug}",
-        f"https://jobs.lever.co/{slug}",
-        f"https://jobs.ashbyhq.com/{slug}",
+    ats_boards = [
+        ("https://boards.greenhouse.io/{slug}", r'href=["\'](/[^"\']+/jobs/(\d+))["\']'),
+        ("https://jobs.lever.co/{slug}", r'href=["\'](https://jobs\.lever\.co/[^"\']+/[a-f0-9-]{8,})["\']'),
+        ("https://jobs.ashbyhq.com/{slug}", r'href=["\'](/[^"\']+/([a-f0-9-]{8,}))["\']'),
     ]
+    title_tokens = [t.lower() for t in title.split() if len(t) > 2]
+    if not title_tokens:
+        return None
+
     async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
-        for url in ats_urls:
+        for board_url_tpl, link_pattern in ats_boards:
+            board_url = board_url_tpl.replace("{slug}", slug)
             try:
-                resp = await client.get(url)
-                if resp.status_code == 200 and title.split()[0].lower() in resp.text.lower():
-                    return url
+                resp = await client.get(board_url)
+                if resp.status_code != 200:
+                    continue
+                body = resp.text[:50000].lower()
+                if not any(tok in body for tok in title_tokens):
+                    continue
+                links = re.findall(link_pattern, resp.text, re.I)
+                for link_match in links:
+                    href = link_match[0] if isinstance(link_match, tuple) else link_match
+                    if not href.startswith("http"):
+                        from urllib.parse import urljoin
+                        href = urljoin(board_url, href)
+                    try:
+                        job_resp = await client.get(href)
+                        job_text = job_resp.text[:10000].lower()
+                        if sum(1 for t in title_tokens if t in job_text) >= max(1, len(title_tokens) // 2):
+                            return href
+                    except Exception:
+                        continue
             except Exception:
                 continue
     return None

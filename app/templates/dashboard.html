@@ -89,15 +89,18 @@
 <h2>Awaiting Approval — Details</h2>
 <div class="card">
 <table>
-<tr><th>Company</th><th>Role</th><th>Score</th><th>Discovery</th><th>Official URL</th><th>Verification</th></tr>
+<tr><th>Company</th><th>Role</th><th>Score</th><th>Match</th><th>Matched Skills</th><th>Missing Skills</th><th>Seniority</th><th>Location</th><th>Official URL</th></tr>
 {% for j in waiting_jobs %}
 <tr>
 <td>{{ j.company }}</td>
 <td>{{ j.title }}</td>
 <td>{{ j.score_total or '' }}</td>
-<td style="font-size:0.85em;">{{ j.discovery_source or j.source }}{% if j.discovery_url %}<br><a href="{{ j.discovery_url }}" target="_blank" rel="noopener">source</a>{% endif %}</td>
+<td>{{ j.match_score or '' }}</td>
+<td style="font-size:0.85em;">{% if j.matched_skills %}{{ j.matched_skills[:8]|join(', ') }}{% if j.matched_skills|length > 8 %} (+{{ j.matched_skills|length - 8 }}){% endif %}{% else %}—{% endif %}</td>
+<td style="font-size:0.85em;">{% if j.missing_skills %}{{ j.missing_skills[:5]|join(', ') }}{% if j.missing_skills|length > 5 %} (+{{ j.missing_skills|length - 5 }}){% endif %}{% else %}—{% endif %}</td>
+<td style="font-size:0.85em;">{{ j.seniority_fit or '—' }}</td>
+<td style="font-size:0.85em;">{{ j.location_fit_detail or '—' }}</td>
 <td style="font-size:0.85em;">{% if j.official_url %}<a href="{{ j.official_url }}" target="_blank" rel="noopener">{{ j.official_url_method or 'official' }}</a>{% else %}{{ j.canonical_url[:60] }}{% endif %}</td>
-<td style="font-size:0.85em;">{% if j.verification_evidence %}{{ j.verification_evidence.get('adapter', '') }}{% endif %}</td>
 </tr>
 {% endfor %}
 </table>
@@ -153,6 +156,23 @@ async function runJobHunt() {
             let msg = `Done: ${d.discovered || 0} discovered, ${d.ingested || 0} new, ${d.verified || 0} verified, ${d.blocked || 0} blocked, ${d.shortlisted || 0} shortlisted, ${d.applications_created || 0} apps`;
             if (d.skipped_aggregator) msg += `, ${d.skipped_aggregator} aggregator-only`;
             if (d.adapter_errors && Object.keys(d.adapter_errors).length) msg += ` | Errors: ${Object.keys(d.adapter_errors).join(', ')}`;
+            if (d.provider_diagnostics && d.provider_diagnostics.length) {
+                let diagEl = document.getElementById('provider-diagnostics');
+                if (!diagEl) {
+                    diagEl = document.createElement('div');
+                    diagEl.id = 'provider-diagnostics';
+                    diagEl.className = 'card';
+                    diagEl.style.marginTop = '0.5rem';
+                    status.parentElement.appendChild(diagEl);
+                }
+                let rows = '<strong>Provider Diagnostics</strong><table style="margin-top:0.4rem;font-size:0.9em;"><tr><th>Provider</th><th>Requests</th><th>Received</th><th>Accepted</th><th>Status</th><th>Errors</th></tr>';
+                for (const p of d.provider_diagnostics) {
+                    const errText = (p.errors && p.errors.length) ? p.errors.join('; ').substring(0, 120) : '—';
+                    rows += `<tr><td>${p.provider}</td><td>${p.requests_made}</td><td>${p.results_received}</td><td>${p.results_accepted}</td><td>${p.status}</td><td style="font-size:0.85em;">${errText}</td></tr>`;
+                }
+                rows += '</table>';
+                diagEl.innerHTML = rows;
+            }
             status.textContent = msg;
         } else {
             status.textContent = 'Error: ' + JSON.stringify(data);

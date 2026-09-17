@@ -47,12 +47,52 @@ def _detect_ats(url: str) -> str:
 class LocalWorker:
     def __init__(self, api_url: str, worker_token: str,
                  browser_profile: str = "./browser_profile",
-                 headless: bool = False):
+                 headless: bool = False,
+                 applications_dir: str = "./applications"):
         self.api_url = api_url.rstrip("/")
         self.worker_token = worker_token
         self.browser_profile = browser_profile
         self.headless = headless
+        self.applications_dir = applications_dir
         self.guard = SubmissionGuard()
+
+    def _safe_app_dir(self, application_key: str) -> Path | None:
+        """Resolve application directory, rejecting path traversal."""
+        if not application_key:
+            return None
+        if "/" in application_key or "\\" in application_key or ".." in application_key:
+            return None
+        base = Path(self.applications_dir).resolve()
+        target = (base / application_key).resolve()
+        try:
+            target.relative_to(base)
+        except ValueError:
+            return None
+        return target
+
+    def run_once(self) -> dict | None:
+        """Poll for one job, process it, return the result (or None if no jobs)."""
+        import asyncio
+        import logging
+        log = logging.getLogger("local_worker")
+
+        jobs = self.poll_jobs()
+        if not jobs:
+            return None
+
+        job = jobs[0]
+        app_dir = self._safe_app_dir(job.get("application_key", ""))
+        if not app_dir:
+            log.warning("Invalid application_key for job %d, skipping", job["id"])
+            return None
+        if not app_dir.exists():
+            log.warning("Application dir %s not found for job %d", app_dir, job["id"])
+            return None
+
+        log.info("Processing job %d: %s at %s", job["id"], job.get("title", ""), job.get("company", ""))
+        result = asyncio.run(self.fill_and_submit(job, app_dir))
+        log.info("Job %d outcome: %s", job["id"], result.get("outcome"))
+        return result
 
     def poll_jobs(self) -> list[dict]:
         with httpx.Client(timeout=30) as client:
@@ -302,9 +342,23 @@ class LocalWorker:
         }
 
     def report_result(self, job_id: int, result: dict):
+        import logging
+        log = logging.getLogger("local_worker")
         with httpx.Client(timeout=30) as client:
-            client.post(
+            resp = client.post(
                 f"{self.api_url}/api/worker/submit/{job_id}",
                 headers={"X-Worker-Token": self.worker_token},
                 json=result,
             )
+            if resp.status_code != 200:
+                log.error(
+                    "Server rejected submission for job %d: %d %s",
+                    job_id, resp.status_code, resp.text[:200],
+                )
+                return {"error": resp.text, "status_code": resp.status_code}
+            return resp.json()
+
+
+if __name__ == "__main__":
+    from local_worker.__main__ import main
+    main()

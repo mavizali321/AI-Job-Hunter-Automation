@@ -109,6 +109,15 @@ class Job(Base):
     score_reasons = Column(JSON, nullable=True)
 
     decision = Column(String(30), nullable=True)
+    rejection_reason = Column(Text, nullable=True)
+
+    matched_skills = Column(JSON, nullable=True)
+    missing_skills = Column(JSON, nullable=True)
+    seniority_fit = Column(String(100), nullable=True)
+    location_fit_detail = Column(String(200), nullable=True)
+    match_score = Column(Float, nullable=True)
+    match_details = Column(JSON, nullable=True)
+
     status = Column(Enum(JobStatus), nullable=False, default=JobStatus.DISCOVERED)
 
     created_at = Column(DateTime(timezone=True), default=_utcnow)
@@ -203,6 +212,31 @@ class Event(Base):
     timestamp = Column(DateTime(timezone=True), default=_utcnow)
 
     job = relationship("Job", back_populates="events", foreign_keys=[entity_id])
+
+
+class CandidateProfile(Base):
+    __tablename__ = "candidate_profiles"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    resume_checksum = Column(String(64), nullable=False, unique=True)
+    name = Column(String(200), nullable=False)
+    email = Column(String(200), nullable=True)
+    phone = Column(String(50), nullable=True)
+    linkedin = Column(String(500), nullable=True)
+    seniority = Column(String(50), nullable=False, default="junior")
+    total_experience_years = Column(Float, nullable=True)
+    skills = Column(JSON, nullable=False, default=dict)
+    confirmed_skills = Column(JSON, nullable=True)
+    profile_only_skills = Column(JSON, nullable=True)
+    experience = Column(JSON, nullable=False, default=list)
+    education = Column(JSON, nullable=False, default=list)
+    projects = Column(JSON, nullable=False, default=list)
+    target_roles = Column(JSON, nullable=False, default=list)
+    location_preferences = Column(JSON, nullable=False, default=list)
+    do_not_claim = Column(JSON, nullable=False, default=list)
+    raw_resume_text = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
 
 class SourceRun(Base):

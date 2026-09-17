@@ -19,6 +19,9 @@ class Settings(BaseSettings):
 
     worker_token: str = "change-me"
     browser_profile_dir: str = "./browser_profile"
+    api_base_url: str = "http://127.0.0.1:8000"
+    worker_poll_seconds: int = 15
+    applications_dir: str = "./applications"
 
     search_window_days: int = 7
     approval_threshold: int = 80
@@ -37,6 +40,7 @@ class Settings(BaseSettings):
     job_titles: str = ""
     job_locations: str = "Karachi,Islamabad,Lahore,Pakistan,Remote"
     max_results_per_run: int = 100
+    min_profile_match_score: int = 70
 
     resume_checksum: str = "E47DD0E6E27E3FE906630219A1CA44D450BE5DC2F07186FF8637D17CCE59DD4E"
 

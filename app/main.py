@@ -6,7 +6,7 @@ import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, Depends, HTTPException, Request, Form, Query, Response
+from fastapi import Body, FastAPI, Depends, HTTPException, Request, Form, Query, Response
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
@@ -21,7 +21,10 @@ from app.models import (
 )
 from app.csv_import import import_csv
 from app.discovery import run_orchestrator
-from app.pipeline import ingest_discovered_job, verify_job, score_and_decide, create_application_for_shortlisted
+from app.pipeline import (
+    ingest_discovered_job, verify_job, score_and_decide,
+    create_application_for_shortlisted, application_slug,
+)
 from app.approval import (
     create_approval, validate_and_decide, decide_by_ref_code, ApprovalChannel,
     check_dual_approval, create_submission_nonce, consume_submission_nonce,
@@ -330,6 +333,40 @@ async def whatsapp_webhook(request: Request, db: Session = Depends(get_db)):
     return {"status": "processed", "decision": decision_text}
 
 
+@app.post("/api/retry-prepare/{job_id}")
+def retry_prepare(
+    job_id: int, request: Request,
+    csrf_token: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    _check_auth(request)
+    cookie_csrf = request.cookies.get(CSRF_COOKIE_NAME, "")
+    if not _verify_csrf(csrf_token, cookie_csrf):
+        raise HTTPException(status_code=403, detail="CSRF validation failed")
+
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    from app.state_machine import VALID_TRANSITIONS
+    if JobStatus.PREPARING not in VALID_TRANSITIONS.get(job.status, set()):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot retry preparation from {job.status.value}",
+        )
+
+    application = db.query(Application).filter(Application.job_id == job.id).first()
+    if not application:
+        raise HTTPException(status_code=404, detail="Application not found")
+
+    from app.pipeline import prepare_application
+    result = prepare_application(db, job, application)
+    if result is None:
+        raise HTTPException(status_code=500, detail="Preparation failed")
+
+    return RedirectResponse(url="/dashboard", status_code=303)
+
+
 # --- Worker Endpoints ---
 
 @app.get("/api/worker/jobs")
@@ -344,20 +381,23 @@ def worker_pending_jobs(request: Request, db: Session = Depends(get_db)):
         .limit(10)
         .all()
     )
-    return [
-        {
+    result = []
+    for j in jobs:
+        app = db.query(Application).filter(Application.job_id == j.id).first()
+        result.append({
             "id": j.id,
             "company": j.company,
             "title": j.title,
-            "url": j.canonical_url,
+            "url": j.official_url or j.canonical_url,
             "score": j.score_total,
-        }
-        for j in jobs
-    ]
+            "application_id": app.id if app else None,
+            "application_key": application_slug(j.company, j.title, app.id if app else None),
+        })
+    return result
 
 
 @app.post("/api/worker/authorize/{job_id}")
-async def worker_authorize(job_id: int, request: Request, db: Session = Depends(get_db)):
+def worker_authorize(job_id: int, request: Request, body: dict = Body(default={}), db: Session = Depends(get_db)):
     token = request.headers.get("X-Worker-Token", "")
     if not hmac.compare_digest(token, settings.worker_token):
         raise HTTPException(status_code=403, detail="Invalid worker token")
@@ -379,7 +419,6 @@ async def worker_authorize(job_id: int, request: Request, db: Session = Depends(
     if not application.manifest_hash:
         raise HTTPException(status_code=400, detail="No manifest hash on application")
 
-    body = await request.json()
     incoming_hash = body.get("manifest_hash", "")
     if incoming_hash and incoming_hash != application.manifest_hash:
         raise HTTPException(status_code=400, detail="Manifest hash mismatch — content changed")
@@ -389,7 +428,7 @@ async def worker_authorize(job_id: int, request: Request, db: Session = Depends(
 
 
 @app.post("/api/worker/submit/{job_id}")
-async def worker_submit_result(job_id: int, request: Request, db: Session = Depends(get_db)):
+def worker_submit_result(job_id: int, request: Request, body: dict = Body(default={}), db: Session = Depends(get_db)):
     token = request.headers.get("X-Worker-Token", "")
     if not hmac.compare_digest(token, settings.worker_token):
         raise HTTPException(status_code=403, detail="Invalid worker token")
@@ -401,7 +440,6 @@ async def worker_submit_result(job_id: int, request: Request, db: Session = Depe
     if job.status != JobStatus.FINAL_APPROVED:
         raise HTTPException(status_code=400, detail=f"Job not in FINAL_APPROVED state (current: {job.status.value})")
 
-    body = await request.json()
     nonce_value = body.get("nonce", "")
     manifest_hash = body.get("manifest_hash", "")
     outcome = body.get("outcome", "")

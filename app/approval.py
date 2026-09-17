@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -9,9 +10,11 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     Approval, ApprovalDecision, ApprovalChannel, ApprovalType,
-    Application, Job, JobStatus, SubmissionNonce,
+    Application, Job, JobStatus, SubmissionNonce, Event,
 )
 from app.state_machine import transition_job, InvalidTransitionError
+
+logger = logging.getLogger(__name__)
 
 
 APPROVAL_EXPIRY_HOURS = 24
@@ -92,6 +95,23 @@ def decide_by_ref_code(
     return _apply_decision(db, approval, decision)
 
 
+def _enqueue_preparation(db: Session, job_id: int):
+    """Enqueue Celery task to prepare the approved application."""
+    try:
+        from app.tasks import prepare_approved_application
+        prepare_approved_application.delay(job_id)
+    except Exception as e:
+        logger.error("Failed to enqueue preparation for job %d: %s", job_id, e)
+        event = Event(
+            entity="preparation",
+            entity_id=job_id,
+            action="enqueue_failed",
+            metadata_={"error": str(e)[:200]},
+        )
+        db.add(event)
+        db.commit()
+
+
 def _apply_decision(
     db: Session,
     approval: Approval,
@@ -151,6 +171,10 @@ def _apply_decision(
             return False, str(e)
 
     db.commit()
+
+    if decision == ApprovalDecision.APPROVED and not is_final:
+        _enqueue_preparation(db, job.id)
+
     return True, f"Approval {decision.value.lower()}"
 
 
@@ -183,6 +207,16 @@ def create_final_approval(
     manifest_hash: str,
     channel: ApprovalChannel = ApprovalChannel.DASHBOARD,
 ) -> tuple[Approval, str]:
+    existing = db.query(Approval).filter(
+        Approval.application_id == application.id,
+        Approval.approval_type == ApprovalType.FINAL,
+        Approval.decision == ApprovalDecision.PENDING,
+    ).all()
+    for old in existing:
+        old.decision = ApprovalDecision.EXPIRED
+    if existing:
+        db.flush()
+
     token = secrets.token_urlsafe(32)
     token_hash = _hash_token(token)
 

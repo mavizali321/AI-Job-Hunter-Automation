@@ -11,7 +11,7 @@ from app.adapters.greenhouse import GreenhouseAdapter
 from app.adapters.lever import LeverAdapter
 from app.adapters.ashby import AshbyAdapter
 from app.adapters.generic import GenericCareerPageAdapter
-from app.search.base import SearchResult, SearchProvider
+from app.search.base import SearchResult, SearchProvider, ProviderDiagnostics
 from app.search.resolver import is_aggregator_url, resolve_official_url, is_official_url
 from app.config import settings
 from app.models import Job, Application, JobStatus, SourceRun, ApprovalDecision
@@ -23,6 +23,8 @@ from app.pipeline import (
     collect_verification_evidence,
 )
 from app.scoring import hard_reject
+from app.state_machine import transition_job
+from app.profile_parser import get_or_refresh_profile, match_job_to_profile, generate_search_queries_from_profile
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +36,21 @@ AGGREGATOR_NEVER_SUBMIT = {
 }
 
 
-def _generate_search_queries() -> list[tuple[str, str]]:
+def _generate_search_queries(db: Session | None = None) -> list[tuple[str, str]]:
+    if db is not None:
+        try:
+            profile = get_or_refresh_profile(db)
+            if profile and profile.target_roles:
+                return generate_search_queries_from_profile(profile)
+        except Exception as e:
+            logger.warning("Failed to load CandidateProfile for queries: %s", e)
+
     titles = settings.job_titles_list
     locations = settings.job_locations_list
     queries = []
     for title in titles:
         for loc in locations:
-            queries.append((f"{title} {loc}", loc))
+            queries.append((title, loc))
     return queries
 
 
@@ -86,17 +96,17 @@ async def _run_adapter(adapter, search_terms: list[str]) -> tuple[str, list[Disc
 async def _run_search_provider(
     provider: SearchProvider,
     queries: list[tuple[str, str]],
-    max_per_query: int = 10,
-) -> tuple[str, list[SearchResult], str | None]:
-    try:
-        all_results: list[SearchResult] = []
-        for query, location in queries:
-            results = await provider.search(query, location=location, max_results=max_per_query)
-            all_results.extend(results)
-        return provider.name, all_results, None
-    except Exception as e:
-        logger.error("Search provider %s failed: %s", provider.name, e)
-        return provider.name, [], str(e)
+    max_results: int = 100,
+) -> tuple[str, list[SearchResult], str | None, ProviderDiagnostics]:
+    results, diagnostics = await provider.search_batch(
+        queries, max_results=max_results,
+    )
+    error = None
+    if diagnostics.status == "failed":
+        error = "; ".join(diagnostics.errors) if diagnostics.errors else "Unknown error"
+    elif diagnostics.status == "partial":
+        error = "; ".join(diagnostics.errors)
+    return provider.name, results, error, diagnostics
 
 
 def _search_result_to_discovered(sr: SearchResult) -> DiscoveredJob:
@@ -127,7 +137,8 @@ async def _verify_via_adapter(adapter, url: str) -> tuple[bool, str]:
 async def discover_all(
     adapters: list | None = None,
     search_providers: list[SearchProvider] | None = None,
-) -> tuple[list[DiscoveredJob], dict[str, str]]:
+    db: Session | None = None,
+) -> tuple[list[DiscoveredJob], dict[str, str], list[ProviderDiagnostics]]:
     if adapters is None:
         adapters = build_adapters()
     if search_providers is None:
@@ -137,22 +148,30 @@ async def discover_all(
 
     adapter_tasks = [_run_adapter(a, adapter_search_terms) for a in adapters]
 
-    queries = _generate_search_queries()
-    max_per_query = max(1, settings.max_results_per_run // max(len(queries), 1))
+    queries = _generate_search_queries(db)
     provider_tasks = [
-        _run_search_provider(p, queries, max_per_query=max_per_query)
+        _run_search_provider(p, queries, max_results=settings.max_results_per_run)
         for p in search_providers
     ]
 
     all_tasks = adapter_tasks + provider_tasks
     if not all_tasks:
-        return [], {}
+        return [], {}, []
 
     results = await asyncio.gather(*all_tasks)
 
     all_jobs: list[DiscoveredJob] = []
     errors: dict[str, str] = {}
-    for name, items, error in results:
+    all_diagnostics: list[ProviderDiagnostics] = []
+
+    for result_tuple in results:
+        if len(result_tuple) == 4:
+            name, items, error, diag = result_tuple
+            all_diagnostics.append(diag)
+        else:
+            name, items, error = result_tuple
+            diag = None
+
         if isinstance(items, list) and items:
             if isinstance(items[0], SearchResult):
                 all_jobs.extend(_search_result_to_discovered(sr) for sr in items)
@@ -160,14 +179,39 @@ async def discover_all(
                 all_jobs.extend(items)
         if error:
             errors[name] = error
-    return all_jobs, errors
+
+    if len(all_jobs) > settings.max_results_per_run:
+        all_jobs = all_jobs[:settings.max_results_per_run]
+    return all_jobs, errors, all_diagnostics
+
+
+def _deduplicate_discovered(jobs: list[DiscoveredJob]) -> list[DiscoveredJob]:
+    seen_urls: set[str] = set()
+    seen_sigs: set[str] = set()
+    unique: list[DiscoveredJob] = []
+    for dj in jobs:
+        url_key = dj.url.lower().rstrip("/")
+        if url_key in seen_urls:
+            continue
+        sig = f"{dj.company.lower()}|{dj.title.lower()}|{(dj.description or '')[:200].lower()}"
+        if sig in seen_sigs:
+            continue
+        seen_urls.add(url_key)
+        seen_sigs.add(sig)
+        unique.append(dj)
+    return unique
 
 
 async def discover_and_verify(
     adapters: list,
     search_providers: list[SearchProvider] | None = None,
-) -> tuple[list[tuple[DiscoveredJob, dict]], dict[str, str]]:
-    all_jobs, adapter_errors = await discover_all(adapters, search_providers)
+    db: Session | None = None,
+) -> tuple[list[tuple[DiscoveredJob, dict]], dict[str, str], list[ProviderDiagnostics]]:
+    all_jobs, adapter_errors, diagnostics = await discover_all(
+        adapters, search_providers, db=db,
+    )
+
+    all_jobs = _deduplicate_discovered(all_jobs)
 
     adapter_map = {a.name: a for a in adapters}
 
@@ -199,6 +243,8 @@ async def discover_and_verify(
             description=dj.description,
             verified_content=verified_content,
             http_success=http_success,
+            discovered_title=dj.title,
+            discovered_company=dj.company,
         )
         evidence["adapter"] = dj.source
         evidence["discovery_url"] = dj.url
@@ -210,7 +256,7 @@ async def discover_and_verify(
 
         verified_results.append((dj, evidence))
 
-    return verified_results, adapter_errors
+    return verified_results, adapter_errors, diagnostics
 
 
 async def _verify_url_directly(url: str) -> tuple[bool, str]:
@@ -238,6 +284,28 @@ def is_fresh(job: DiscoveredJob, window_days: int | None = None) -> bool:
 
 def is_discovery_only_source(source: str) -> bool:
     return source.lower() in DISCOVERY_ONLY_SOURCES
+
+
+def _check_profile_gate(match: dict, profile) -> str | None:
+    seniority = match.get("seniority_fit", "")
+    if seniority.startswith("poor"):
+        return f"Seniority mismatch: {seniority}"
+
+    location = match.get("location_fit", "")
+    if location.startswith("poor"):
+        return f"Location ineligible: {location}"
+
+    do_not_claim = profile.do_not_claim or []
+    for blocked in match.get("blocked_fields", []):
+        for dnc in do_not_claim:
+            if any(term in blocked.lower() for term in dnc.lower().split(",")):
+                return f"Required qualification conflicts with do_not_claim: {blocked}"
+
+    score = match.get("match_score", 0)
+    if score < settings.min_profile_match_score:
+        return f"Profile match score {score:.0f} below minimum {settings.min_profile_match_score}"
+
+    return None
 
 
 def _send_first_approval(db: Session, job: Job, application: Application) -> dict:
@@ -287,8 +355,14 @@ def run_orchestrator(
     db.commit()
 
     try:
-        verified_results, adapter_errors = asyncio.run(
-            discover_and_verify(adapters, search_providers)
+        profile = None
+        try:
+            profile = get_or_refresh_profile(db)
+        except Exception as e:
+            logger.warning("Could not load CandidateProfile: %s", e)
+
+        verified_results, adapter_errors, provider_diagnostics = asyncio.run(
+            discover_and_verify(adapters, search_providers, db=db)
         )
 
         fresh_results = [(dj, ev) for dj, ev in verified_results if is_fresh(dj)]
@@ -354,10 +428,41 @@ def run_orchestrator(
                 else:
                     blocked_count += 1
 
+        profile_rejected = 0
+        verified_in_db = db.query(Job).filter(Job.status == JobStatus.VERIFIED).all()
+        if profile:
+            for job in verified_in_db:
+                try:
+                    match = match_job_to_profile(
+                        profile,
+                        title=job.title,
+                        description=job.description,
+                        requirements=job.requirements,
+                        location=job.location,
+                        remote_policy=job.remote_policy,
+                    )
+                    job.matched_skills = match["matched_skills"]
+                    job.missing_skills = match["missing_skills"]
+                    job.seniority_fit = match["seniority_fit"]
+                    job.location_fit_detail = match["location_fit"]
+                    job.match_score = match["match_score"]
+                    job.match_details = match
+
+                    rejection = _check_profile_gate(match, profile)
+                    if rejection:
+                        job.rejection_reason = rejection
+                        transition_job(db, job, JobStatus.SKIPPED, {"reason": rejection})
+                        db.commit()
+                        profile_rejected += 1
+                    else:
+                        db.commit()
+                except Exception as e:
+                    logger.warning("Profile match failed for job %s: %s", job.id, e)
+
         scored_count = 0
         shortlisted_count = 0
-        verified_in_db = db.query(Job).filter(Job.status == JobStatus.VERIFIED).all()
-        for job in verified_in_db:
+        still_verified = db.query(Job).filter(Job.status == JobStatus.VERIFIED).all()
+        for job in still_verified:
             result = score_and_decide(db, job)
             if result:
                 scored_count += 1
@@ -389,11 +494,13 @@ def run_orchestrator(
             "skipped_aggregator": skipped_aggregator,
             "verified": verified_count,
             "blocked": blocked_count,
+            "profile_rejected": profile_rejected,
             "scored": scored_count,
             "shortlisted": shortlisted_count,
             "applications_created": apps_created,
             "approval_results": approval_results,
             "adapter_errors": adapter_errors,
+            "provider_diagnostics": [d.to_dict() for d in provider_diagnostics],
         }
 
     except Exception as e:

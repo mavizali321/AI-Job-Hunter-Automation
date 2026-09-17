@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import httpx
 
 from app.search.base import SearchProvider, SearchResult
+from app.search.retry import request_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +26,9 @@ class SerperProvider(SearchProvider):
         max_results: int = 25,
     ) -> list[SearchResult]:
         results: list[SearchResult] = []
+        search_text = f"{query} {location}" if location else query
         params: dict = {
-            "q": query,
+            "q": search_text,
             "num": min(max_results, 100),
         }
         if location:
@@ -34,12 +36,11 @@ class SerperProvider(SearchProvider):
             params["location"] = location
 
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                SERPER_ENDPOINT,
+            resp = await request_with_retry(
+                client, "post", SERPER_ENDPOINT,
                 json=params,
                 headers={"X-API-KEY": self.api_key, "Content-Type": "application/json"},
             )
-            resp.raise_for_status()
             data = resp.json()
 
         for item in data.get("organic", [])[:max_results]:
