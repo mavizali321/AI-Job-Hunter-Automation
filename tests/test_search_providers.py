@@ -343,6 +343,45 @@ class TestDiscoveryToFirstApproval:
 
 
 # ---------------------------------------------------------------------------
+# Test: Search provider jobs auto-verified (trusted source bypass)
+# ---------------------------------------------------------------------------
+
+class TestSearchProviderAutoVerification:
+    @patch("app.discovery._generate_search_queries", return_value=[("AI Engineer Karachi", "Karachi")])
+    def test_discovery_only_source_auto_verified(self, _mock_queries, db):
+        """Jobs from discovery-only sources bypass strict page verification."""
+        sr = _sr(
+            source="remotive",
+            url="https://aistartup.com/careers/ai-engineer-123",
+            posted_date=None,
+        )
+        provider = FakeSearchProvider(results=[sr])
+        provider.name = "remotive"
+        result = run_orchestrator(db, adapters=[], search_providers=[provider])
+        assert result["ingested"] >= 1
+        assert result["verified"] >= 1
+        assert result["blocked"] == 0
+
+        job = db.query(Job).first()
+        assert job is not None
+        assert job.status in (JobStatus.VERIFIED, JobStatus.SCORED, JobStatus.SHORTLISTED, JobStatus.SKIPPED)
+        assert job.verification_evidence.get("trusted_search_provider") is True
+
+    @patch("app.discovery._generate_search_queries", return_value=[("AI Engineer Karachi", "Karachi")])
+    def test_arbeitnow_source_auto_verified(self, _mock_queries, db):
+        sr = _sr(
+            source="arbeitnow",
+            url="https://techcorp.com/jobs/ai-engineer-456",
+            posted_date=None,
+        )
+        provider = FakeSearchProvider(results=[sr])
+        provider.name = "arbeitnow"
+        result = run_orchestrator(db, adapters=[], search_providers=[provider])
+        assert result["verified"] >= 1
+        assert result["blocked"] == 0
+
+
+# ---------------------------------------------------------------------------
 # Test: Individual provider date parsers
 # ---------------------------------------------------------------------------
 
