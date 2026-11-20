@@ -356,11 +356,12 @@ def run_orchestrator(
     db: Session,
     adapters: list | None = None,
     search_providers: list[SearchProvider] | None = None,
+    user_id: int | None = None,
 ) -> dict:
     if adapters is None:
         adapters = build_adapters()
 
-    run = SourceRun(source="orchestrator", started_at=datetime.now(timezone.utc))
+    run = SourceRun(source="orchestrator", started_at=datetime.now(timezone.utc), user_id=user_id)
     db.add(run)
     db.commit()
 
@@ -404,6 +405,7 @@ def run_orchestrator(
                 company=dj.company,
                 url=use_url,
                 source=dj.source,
+                user_id=user_id,
                 location=dj.location,
                 remote_policy=dj.remote_policy,
                 description=dj.description,
@@ -439,7 +441,10 @@ def run_orchestrator(
                     blocked_count += 1
 
         profile_rejected = 0
-        verified_in_db = db.query(Job).filter(Job.status == JobStatus.VERIFIED).all()
+        q_verified = db.query(Job).filter(Job.status == JobStatus.VERIFIED)
+        if user_id is not None:
+            q_verified = q_verified.filter(Job.user_id == user_id)
+        verified_in_db = q_verified.all()
         if profile:
             for job in verified_in_db:
                 try:
@@ -471,7 +476,10 @@ def run_orchestrator(
 
         scored_count = 0
         shortlisted_count = 0
-        still_verified = db.query(Job).filter(Job.status == JobStatus.VERIFIED).all()
+        q_still = db.query(Job).filter(Job.status == JobStatus.VERIFIED)
+        if user_id is not None:
+            q_still = q_still.filter(Job.user_id == user_id)
+        still_verified = q_still.all()
         for job in still_verified:
             result = score_and_decide(db, job)
             if result:
@@ -481,7 +489,10 @@ def run_orchestrator(
 
         apps_created = 0
         approval_results = []
-        shortlisted_in_db = db.query(Job).filter(Job.status == JobStatus.SHORTLISTED).all()
+        q_short = db.query(Job).filter(Job.status == JobStatus.SHORTLISTED)
+        if user_id is not None:
+            q_short = q_short.filter(Job.user_id == user_id)
+        shortlisted_in_db = q_short.all()
         for job in shortlisted_in_db:
             application = create_application_for_shortlisted(db, job)
             if application:

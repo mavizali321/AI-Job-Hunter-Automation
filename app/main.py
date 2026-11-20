@@ -392,7 +392,7 @@ def api_run_hunt(
     if not user.resume_path:
         raise HTTPException(status_code=400, detail="Upload your resume first")
 
-    result = run_orchestrator(db)
+    result = run_orchestrator(db, user_id=user.id)
     return {"status": "ok", "discovery": result}
 
 

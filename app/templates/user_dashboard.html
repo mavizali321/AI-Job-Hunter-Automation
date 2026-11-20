@@ -70,6 +70,13 @@ th { color: var(--muted); font-weight: 600; }
         <div class="card" id="profile-card"></div>
     </div>
 
+    <div id="hunt-section" class="section" style="display:none;">
+        <button class="btn btn-primary" id="hunt-btn" onclick="startJobHunt()" style="width:100%;padding:14px;font-size:1.1em;">
+            Start Job Hunt
+        </button>
+        <div id="hunt-msg" style="margin-top:12px;"></div>
+    </div>
+
     <div class="section">
         <h2>Your Jobs</h2>
         <div id="jobs-list"></div>
@@ -103,6 +110,7 @@ async function loadDashboard() {
                 '<div class="msg msg-success">Resume uploaded. <a href="#" onclick="showUpload()" style="color:#86efac;">Update resume</a></div>' +
                 '<div id="upload-form" style="display:none;"></div>';
             showProfile(data.profile);
+            document.getElementById('hunt-section').style.display = 'block';
         } else {
             showUpload();
         }
@@ -221,6 +229,39 @@ async function loadApplications() {
         html += '</table>';
         el.innerHTML = html;
     } catch (e) {}
+}
+
+async function startJobHunt() {
+    const btn = document.getElementById('hunt-btn');
+    const msg = document.getElementById('hunt-msg');
+    btn.disabled = true;
+    btn.textContent = 'Hunting jobs... This may take a few minutes';
+    msg.innerHTML = '<div class="msg msg-info">Searching job boards, verifying listings, scoring matches...</div>';
+
+    try {
+        const res = await fetch('/api/my/run-hunt', {method: 'POST', headers});
+        const data = await res.json();
+        if (!res.ok) {
+            msg.innerHTML = '<div class="msg msg-error">' + (data.detail || 'Hunt failed') + '</div>';
+            btn.disabled = false;
+            btn.textContent = 'Start Job Hunt';
+            return;
+        }
+        const d = data.discovery || {};
+        msg.innerHTML = `<div class="msg msg-success">
+            Hunt complete! Found ${d.discovered || 0} jobs, ingested ${d.ingested || 0} new,
+            scored ${d.scored || 0}, shortlisted ${d.shortlisted || 0}.
+        </div>`;
+        btn.textContent = 'Run Another Hunt';
+        btn.disabled = false;
+        loadJobs();
+        loadApplications();
+        loadDashboard();
+    } catch (e) {
+        msg.innerHTML = '<div class="msg msg-error">Network error — try again</div>';
+        btn.disabled = false;
+        btn.textContent = 'Start Job Hunt';
+    }
 }
 
 function logout() {
