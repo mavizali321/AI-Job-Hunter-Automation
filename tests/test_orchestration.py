@@ -560,11 +560,48 @@ class TestApplicationSlug:
 
     def test_truncated_at_60(self):
         slug = application_slug("A" * 40, "B" * 40, 99)
-        base = f"{'a' * 40}-{'b' * 40}".lower().replace(" ", "-")[:60]
+        base = f"{'a' * 40}-{'b' * 40}"[:60]
         assert slug == f"{base}-app-99"
+        assert len(base) == 60
 
     def test_without_id_backward_compatible(self):
         assert application_slug("TestCo", "AI Engineer") == "testco-ai-engineer"
+
+    def test_traversal_dots_slashes(self):
+        assert ".." not in application_slug("../../evil", "role", 1)
+        slug = application_slug("../../evil", "role", 1)
+        assert slug.startswith("evil-role-app-1") or slug == "evil-role-app-1"
+
+    def test_forward_slash_stripped(self):
+        slug = application_slug("company/name", "role", 1)
+        assert "/" not in slug
+        assert slug == "company-name-role-app-1"
+
+    def test_backslash_stripped(self):
+        slug = application_slug("company\\name", "role", 1)
+        assert "\\" not in slug
+        assert slug == "company-name-role-app-1"
+
+    def test_dots_and_unicode(self):
+        slug = application_slug("corp..v2", "rôle spécial", 5)
+        assert all(c in "abcdefghijklmnopqrstuvwxyz0123456789-" for c in slug.split("-app-")[0])
+
+    def test_windows_reserved_chars(self):
+        slug = application_slug('co:*?"<>|', "title", 7)
+        assert all(c in "abcdefghijklmnopqrstuvwxyz0123456789-" for c in slug.split("-app-")[0])
+        assert not slug.startswith("-")
+
+    def test_empty_sanitized_uses_fallback(self):
+        slug = application_slug("///", "...", 3)
+        assert slug == "application-app-3"
+
+    def test_target_cannot_escape_applications_dir(self, tmp_path):
+        base = tmp_path / "apps"
+        base.mkdir()
+        for malicious in ["../../etc/passwd", "..\\windows", "....//....//evil"]:
+            slug = application_slug(malicious, "x", 1)
+            target = (base / slug).resolve()
+            target.relative_to(base.resolve())
 
     def test_two_identical_jobs_different_dirs(self, db, tmp_path, monkeypatch):
         """Two applications with same company/title get different directories."""

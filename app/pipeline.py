@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -276,10 +277,17 @@ PREPARATION_ELIGIBLE = {
 
 
 def application_slug(company: str, title: str, application_id: int | None = None) -> str:
-    base = f"{company}-{title}".lower().replace(" ", "-")[:60]
+    raw = f"{company}-{title}".lower()
+    sanitized = re.sub(r"[^a-z0-9-]", "-", raw)
+    sanitized = re.sub(r"-{2,}", "-", sanitized)
+    sanitized = sanitized.strip("-.")
+    sanitized = sanitized[:60]
+    sanitized = sanitized.strip("-.")
+    if not sanitized:
+        sanitized = "application"
     if application_id is not None:
-        return f"{base}-app-{application_id}"
-    return base
+        return f"{sanitized}-app-{application_id}"
+    return sanitized
 
 
 def prepare_application(db: Session, job: Job, application: Application) -> Path | None:
@@ -291,7 +299,9 @@ def prepare_application(db: Session, job: Job, application: Application) -> Path
     db.commit()
 
     slug = application_slug(job.company, job.title, application.id)
-    app_dir = Path(settings.applications_dir) / slug
+    base_dir = Path(settings.applications_dir).resolve()
+    app_dir = (base_dir / slug).resolve()
+    app_dir.relative_to(base_dir)
     app_dir.mkdir(parents=True, exist_ok=True)
 
     snapshot = {

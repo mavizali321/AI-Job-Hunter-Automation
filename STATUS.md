@@ -51,7 +51,10 @@
 - **Celery optional**: `app/tasks.py` handles `ImportError` for celery gracefully. `_task` decorator registers with Celery when available, otherwise makes functions directly callable with `.delay()`.
 - **Celery tasks**: Scheduled discovery (morning 09:00 / evening 18:00 Asia/Karachi), recovery (every 5 min)
 - **Docker Compose**: API + worker + beat + PostgreSQL + Redis
-- **Test suite**: 306 tests, 0 failed, 0 skipped, covering:
+- **Structured logging**: structlog with request method, path, status, duration per request
+- **Rate limiting**: In-memory middleware, 120 requests/minute per IP, returns 429 when exceeded
+- **Lifespan management**: FastAPI lifespan context manager (replaced deprecated on_event)
+- **Test suite**: 313 tests, 0 failed, 0 skipped, covering:
   - State machine: all valid transitions, invalid transitions blocked, event logging
   - Pipeline: ingest, verify, score, shortlist, deduplication, missing posted_date
   - Approval: create/validate, ref-code decisions, payload hash binding, expiry, dual approval enforcement
@@ -140,7 +143,7 @@
 
 ## Not Yet Implemented
 
-- **Clean source archive**: Not yet created (Req 12).
+- **Clean source archive**: Not yet created.
 
 ## Acceptance Check Results
 
@@ -161,7 +164,7 @@
 | Worker authorize endpoint returns nonce | PASS |
 | Worker submit endpoint validates nonce and handles outcomes | PASS |
 | WhatsApp webhook signature verification when secret configured | PASS |
-| All 306 tests pass, 0 failed, 0 skipped | PASS |
+| All 313 tests pass, 0 failed, 0 skipped | PASS |
 | Original resume checksum unchanged | PASS |
 | Fixture HTML forms + Playwright browser submit test | PASS |
 | CSRF protection (double-submit cookie, 4 tests) | PASS |
@@ -227,4 +230,6 @@
 | Two identical company/title → different directories | PASS |
 | Worker report_result validates HTTP response, logs rejection | PASS |
 | Connected integration: real task, real endpoints, real polling → SUBMITTED | PASS |
-| Clean source archive created | NOT DONE |
+| Structured logging with request duration | PASS |
+| Rate limiting middleware (120 req/min per IP) | PASS |
+| Health and readiness endpoints | PASS |

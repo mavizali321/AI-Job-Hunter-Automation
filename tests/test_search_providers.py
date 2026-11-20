@@ -210,10 +210,11 @@ class TestFreshnessFiltering:
     def test_stale_result_rejected(self):
         sr = _sr(posted_date=datetime.now(timezone.utc) - timedelta(days=14))
         dj = _search_result_to_discovered(sr)
-        assert is_fresh(dj) is False
+        assert is_fresh(dj, window_days=7) is False
 
     @patch("app.discovery._generate_search_queries", return_value=[("AI Engineer Karachi", "Karachi")])
-    def test_stale_results_filtered_in_orchestrator(self, _mock_queries, db):
+    def test_stale_results_filtered_in_orchestrator(self, _mock_queries, db, monkeypatch):
+        monkeypatch.setattr("app.discovery.settings.search_window_days", 7)
         stale = _sr(posted_date=datetime.now(timezone.utc) - timedelta(days=14))
         provider = FakeSearchProvider(results=[stale])
         result = run_orchestrator(db, adapters=[], search_providers=[provider])

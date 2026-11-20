@@ -1,12 +1,26 @@
 """Shared test fixtures."""
 
 import os
+import sys
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 os.environ["DATABASE_URL"] = "sqlite://"
+
+
+if sys.platform == "win32":
+    import _pytest.pathlib as _pathlib
+    _orig_cleanup = _pathlib.cleanup_dead_symlinks
+
+    def _safe_cleanup(root):
+        try:
+            _orig_cleanup(root)
+        except PermissionError:
+            pass
+
+    _pathlib.cleanup_dead_symlinks = _safe_cleanup
 
 from app.database import Base, get_db
 from app.models import Job, Application, Approval, CandidateAnswer, CandidateProfile, Event, SourceRun, SubmissionNonce  # noqa

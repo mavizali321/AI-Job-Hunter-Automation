@@ -106,7 +106,7 @@ class TestFreshness:
 
     def test_stale_job(self):
         job = _make_job(posted_date=datetime.now(timezone.utc) - timedelta(days=10))
-        assert is_fresh(job) is False
+        assert is_fresh(job, window_days=7) is False
 
     def test_no_date_not_fresh(self):
         job = _make_job(posted_date=None)
@@ -178,7 +178,8 @@ class TestRunOrchestrator:
         assert result2["skipped_dedup"] == 1
         assert db.query(Job).count() == 1
 
-    def test_stale_jobs_filtered(self, db):
+    def test_stale_jobs_filtered(self, db, monkeypatch):
+        monkeypatch.setattr("app.discovery.settings.search_window_days", 7)
         stale = _make_job(posted_date=datetime.now(timezone.utc) - timedelta(days=14))
         adapter = FakeAdapter(jobs=[stale])
         result = run_orchestrator(db, adapters=[adapter], search_providers=[])

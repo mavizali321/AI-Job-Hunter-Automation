@@ -2,7 +2,11 @@
 
 import hashlib
 import hmac
+import logging
 import secrets
+import time
+from collections import defaultdict
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -12,6 +16,8 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from itsdangerous import URLSafeTimedSerializer
+
+import structlog
 
 from app.config import settings
 from app.database import get_db, engine, Base
@@ -31,7 +37,48 @@ from app.approval import (
 )
 from app.state_machine import transition_job, InvalidTransitionError
 
-app = FastAPI(title="Maviz AI Job Hunter", version="1.0.0")
+structlog.configure(
+    processors=[
+        structlog.contextvars.merge_contextvars,
+        structlog.processors.add_log_level,
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.dev.ConsoleRenderer(),
+    ],
+    wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
+    logger_factory=structlog.PrintLoggerFactory(),
+    cache_logger_on_first_use=True,
+)
+logger = structlog.get_logger()
+
+
+class RateLimiter:
+    def __init__(self, requests_per_minute: int = 60):
+        self._rpm = requests_per_minute
+        self._hits: dict[str, list[float]] = defaultdict(list)
+
+    def is_allowed(self, key: str) -> bool:
+        now = time.monotonic()
+        window = now - 60.0
+        hits = self._hits[key]
+        self._hits[key] = [t for t in hits if t > window]
+        if len(self._hits[key]) >= self._rpm:
+            return False
+        self._hits[key].append(now)
+        return True
+
+
+rate_limiter = RateLimiter(requests_per_minute=120)
+
+
+@asynccontextmanager
+async def lifespan(app):
+    Base.metadata.create_all(bind=engine)
+    logger.info("app_started")
+    yield
+    logger.info("app_stopped")
+
+
+app = FastAPI(title="Maviz AI Job Hunter", version="1.0.0", lifespan=lifespan)
 
 templates_dir = Path(__file__).parent / "templates"
 templates_dir.mkdir(exist_ok=True)
@@ -66,9 +113,22 @@ def _check_auth(request: Request):
         raise HTTPException(status_code=401, detail="Session expired")
 
 
-@app.on_event("startup")
-def startup():
-    Base.metadata.create_all(bind=engine)
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    client_ip = request.client.host if request.client else "unknown"
+    if not rate_limiter.is_allowed(client_ip):
+        return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
+    start = time.monotonic()
+    response = await call_next(request)
+    duration_ms = (time.monotonic() - start) * 1000
+    logger.info(
+        "request",
+        method=request.method,
+        path=request.url.path,
+        status=response.status_code,
+        duration_ms=round(duration_ms, 1),
+    )
+    return response
 
 
 @app.get("/health")
