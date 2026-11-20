@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     applications_dir: str = "./applications"
     uploads_dir: str = "./uploads"
 
-    search_window_days: int = 7
+    search_window_days: int = 30
     approval_threshold: int = 80
     review_threshold: int = 70
     timezone: str = "Asia/Karachi"

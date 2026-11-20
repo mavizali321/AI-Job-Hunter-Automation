@@ -108,9 +108,9 @@ class TestFreshness:
         job = _make_job(posted_date=datetime.now(timezone.utc) - timedelta(days=10))
         assert is_fresh(job, window_days=7) is False
 
-    def test_no_date_not_fresh(self):
+    def test_no_date_treated_as_fresh(self):
         job = _make_job(posted_date=None)
-        assert is_fresh(job) is False
+        assert is_fresh(job) is True
 
     def test_custom_window(self):
         job = _make_job(posted_date=datetime.now(timezone.utc) - timedelta(days=5))

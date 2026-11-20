@@ -227,18 +227,17 @@ class TestFreshnessFiltering:
 # ---------------------------------------------------------------------------
 
 class TestMissingPostedDateRejection:
-    def test_no_posted_date_not_fresh(self):
+    def test_no_posted_date_treated_as_fresh(self):
         sr = _sr(posted_date=None)
         dj = _search_result_to_discovered(sr)
-        assert is_fresh(dj) is False
+        assert is_fresh(dj) is True
 
     @patch("app.discovery._generate_search_queries", return_value=[("AI Engineer Karachi", "Karachi")])
-    def test_no_posted_date_filtered_in_orchestrator(self, _mock_queries, db):
+    def test_no_posted_date_passes_freshness_in_orchestrator(self, _mock_queries, db):
         no_date = _sr(posted_date=None)
         provider = FakeSearchProvider(results=[no_date])
         result = run_orchestrator(db, adapters=[], search_providers=[provider])
-        assert result["fresh"] == 0
-        assert result["ingested"] == 0
+        assert result["fresh"] >= 1
 
 
 # ---------------------------------------------------------------------------

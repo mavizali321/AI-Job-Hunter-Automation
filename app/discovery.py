@@ -273,7 +273,7 @@ async def _verify_url_directly(url: str) -> tuple[bool, str]:
 
 def is_fresh(job: DiscoveredJob, window_days: int | None = None) -> bool:
     if not job.posted_date:
-        return False
+        return True
     window = window_days if window_days is not None else settings.search_window_days
     cutoff = datetime.now(timezone.utc) - timedelta(days=window)
     posted = job.posted_date
