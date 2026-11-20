@@ -15,3 +15,5 @@ screenshots/
 *.zip
 *.rar
 .git/
+celerybeat-schedule
+uploads/

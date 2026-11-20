@@ -279,7 +279,7 @@ class TestCSRFProtection:
         resp = client.post(
             "/api/approve-ref/DEADBEEF",
             data={},
-            cookies={"auth": token},
+            cookies={"admin_auth": token},
         )
         assert resp.status_code == 403
 
@@ -288,7 +288,7 @@ class TestCSRFProtection:
         resp = client.post(
             "/api/approve-ref/DEADBEEF",
             data={"csrf_token": "wrong"},
-            cookies={"auth": token, "csrf_token": "correct"},
+            cookies={"admin_auth": token, "csrf_token": "correct"},
         )
         assert resp.status_code == 403
 
@@ -298,7 +298,7 @@ class TestCSRFProtection:
         resp = client.post(
             "/api/approve-ref/DEADBEEF",
             data={"csrf_token": csrf},
-            cookies={"auth": token, "csrf_token": csrf},
+            cookies={"admin_auth": token, "csrf_token": csrf},
             follow_redirects=False,
         )
         assert resp.status_code != 403
@@ -308,6 +308,6 @@ class TestCSRFProtection:
         resp = client.post(
             "/api/reject-ref/DEADBEEF",
             data={},
-            cookies={"auth": token},
+            cookies={"admin_auth": token},
         )
         assert resp.status_code == 403

@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard — AI Job Hunter</title>
+<style>
+:root { --bg: #0f172a; --card: #1e293b; --accent: #3b82f6; --text: #f1f5f9; --muted: #94a3b8; --border: #334155; --success: #22c55e; --error: #ef4444; --warning: #f59e0b; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); padding: 16px; max-width: 1000px; margin: 0 auto; }
+nav { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
+nav .brand { font-size: 1.2em; font-weight: 700; color: var(--accent); }
+nav .user-info { color: var(--muted); font-size: 0.9em; }
+nav a { color: var(--accent); text-decoration: none; margin-left: 16px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 24px; }
+.stat-card { background: var(--card); padding: 20px; border-radius: 12px; text-align: center; }
+.stat-card .num { font-size: 2em; font-weight: bold; }
+.stat-card .label { color: var(--muted); font-size: 0.85em; margin-top: 4px; }
+.section { margin-bottom: 24px; }
+.section h2 { margin-bottom: 12px; font-size: 1.2em; }
+.card { background: var(--card); padding: 16px; border-radius: 12px; margin-bottom: 12px; }
+.msg { padding: 12px; border-radius: 8px; margin-bottom: 16px; font-size: 0.9em; }
+.msg-info { background: #1e3a5f; color: #93c5fd; }
+.msg-success { background: #14532d; color: #86efac; }
+.msg-error { background: #450a0a; color: #fca5a5; }
+.btn { display: inline-block; padding: 10px 24px; border-radius: 8px; border: none; cursor: pointer; font-size: 0.95em; font-weight: 600; text-decoration: none; color: white; }
+.btn-primary { background: var(--accent); }
+.btn-success { background: var(--success); }
+.btn-primary:hover, .btn-success:hover { opacity: 0.9; }
+.upload-area { border: 2px dashed var(--border); border-radius: 12px; padding: 32px; text-align: center; cursor: pointer; transition: border-color 0.2s; }
+.upload-area:hover { border-color: var(--accent); }
+.upload-area input { display: none; }
+table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+th, td { padding: 10px; text-align: left; border-bottom: 1px solid var(--border); }
+th { color: var(--muted); font-weight: 600; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 0.75em; font-weight: 600; }
+.badge-green { background: #14532d; color: #86efac; }
+.badge-blue { background: #1e3a5f; color: #93c5fd; }
+.badge-yellow { background: #422006; color: #fcd34d; }
+.badge-red { background: #450a0a; color: #fca5a5; }
+.badge-gray { background: #1e293b; color: #94a3b8; }
+#loading { text-align: center; padding: 48px; color: var(--muted); }
+</style>
+</head>
+<body>
+<nav>
+    <span class="brand">AI Job Hunter</span>
+    <div>
+        <span class="user-info" id="user-name"></span>
+        <a href="#" onclick="logout()">Logout</a>
+    </div>
+</nav>
+
+<div id="loading">Loading dashboard...</div>
+<div id="app" style="display:none;">
+
+    <div class="stats">
+        <div class="stat-card"><div class="num" id="stat-jobs">0</div><div class="label">Jobs Found</div></div>
+        <div class="stat-card"><div class="num" id="stat-apps">0</div><div class="label">Applications</div></div>
+        <div class="stat-card"><div class="num" id="stat-submitted">0</div><div class="label">Submitted</div></div>
+    </div>
+
+    <div id="resume-section" class="section">
+        <h2>Resume</h2>
+        <div id="resume-status"></div>
+    </div>
+
+    <div id="profile-section" class="section" style="display:none;">
+        <h2>Your Profile (from resume)</h2>
+        <div class="card" id="profile-card"></div>
+    </div>
+
+    <div class="section">
+        <h2>Your Jobs</h2>
+        <div id="jobs-list"></div>
+    </div>
+
+    <div class="section">
+        <h2>Your Applications</h2>
+        <div id="apps-list"></div>
+    </div>
+</div>
+
+<script>
+const token = localStorage.getItem('token');
+if (!token) window.location.href = '/login';
+
+const headers = {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'};
+
+async function loadDashboard() {
+    try {
+        const res = await fetch('/api/me', {headers});
+        if (res.status === 401) { logout(); return; }
+        const data = await res.json();
+
+        document.getElementById('user-name').textContent = data.user.name;
+        document.getElementById('stat-jobs').textContent = data.stats.total_jobs;
+        document.getElementById('stat-apps').textContent = data.stats.total_applications;
+        document.getElementById('stat-submitted').textContent = data.stats.submitted;
+
+        if (data.user.has_resume && data.profile) {
+            document.getElementById('resume-status').innerHTML =
+                '<div class="msg msg-success">Resume uploaded. <a href="#" onclick="showUpload()" style="color:#86efac;">Update resume</a></div>' +
+                '<div id="upload-form" style="display:none;"></div>';
+            showProfile(data.profile);
+        } else {
+            showUpload();
+        }
+
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('app').style.display = 'block';
+
+        loadJobs();
+        loadApplications();
+    } catch (e) {
+        document.getElementById('loading').textContent = 'Failed to load dashboard';
+    }
+}
+
+function showUpload() {
+    const el = document.getElementById('resume-status');
+    el.innerHTML = `
+        <div class="upload-area" onclick="document.getElementById('file-input').click()">
+            <input type="file" id="file-input" accept=".pdf" onchange="uploadResume()">
+            <p style="font-size:1.1em;margin-bottom:8px;">Click to upload your resume (PDF)</p>
+            <p style="color:var(--muted);font-size:0.85em;">Max 10MB</p>
+        </div>
+        <div id="upload-msg" style="margin-top:12px;"></div>
+    `;
+}
+
+async function uploadResume() {
+    const fileInput = document.getElementById('file-input');
+    const file = fileInput.files[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    document.getElementById('upload-msg').innerHTML = '<div class="msg msg-info">Uploading and analyzing...</div>';
+
+    try {
+        const res = await fetch('/api/resume/upload', {
+            method: 'POST',
+            headers: {'Authorization': 'Bearer ' + token},
+            body: formData
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            document.getElementById('upload-msg').innerHTML = '<div class="msg msg-error">' + (data.detail || 'Upload failed') + '</div>';
+            return;
+        }
+        document.getElementById('upload-msg').innerHTML = '<div class="msg msg-success">Resume uploaded and analyzed!</div>';
+        if (data.profile) showProfile(data.profile);
+        loadDashboard();
+    } catch (e) {
+        document.getElementById('upload-msg').innerHTML = '<div class="msg msg-error">Network error</div>';
+    }
+}
+
+function showProfile(profile) {
+    const section = document.getElementById('profile-section');
+    const card = document.getElementById('profile-card');
+    section.style.display = 'block';
+    const skills = (profile.skills && profile.skills.detected) ? profile.skills.detected.join(', ') : 'None detected';
+    const roles = profile.target_roles ? profile.target_roles.join(', ') : 'Not determined';
+    card.innerHTML = `
+        <p><strong>Seniority:</strong> ${profile.seniority || 'N/A'}</p>
+        <p><strong>Experience:</strong> ${profile.experience_years || 0} years</p>
+        <p><strong>Skills:</strong> ${skills}</p>
+        <p><strong>Target Roles:</strong> ${roles}</p>
+    `;
+}
+
+function badgeClass(status) {
+    if (!status) return 'badge-gray';
+    if (['SUBMITTED', 'APPROVED', 'FINAL_APPROVED'].includes(status)) return 'badge-green';
+    if (['WAITING_APPROVAL', 'AWAITING_FINAL_APPROVAL', 'PREPARING'].includes(status)) return 'badge-yellow';
+    if (['REJECTED', 'FAILED', 'EXPIRED'].includes(status)) return 'badge-red';
+    if (['SCORED', 'SHORTLISTED', 'VERIFIED'].includes(status)) return 'badge-blue';
+    return 'badge-gray';
+}
+
+async function loadJobs() {
+    try {
+        const res = await fetch('/api/my/jobs?limit=20', {headers});
+        const jobs = await res.json();
+        const el = document.getElementById('jobs-list');
+        if (!jobs.length) { el.innerHTML = '<div class="card" style="color:var(--muted);">No jobs found yet. Upload your resume and run a job hunt!</div>'; return; }
+
+        let html = '<table><tr><th>Company</th><th>Role</th><th>Score</th><th>Status</th></tr>';
+        for (const j of jobs) {
+            html += `<tr>
+                <td>${j.company || ''}</td>
+                <td><a href="${j.url || '#'}" target="_blank" style="color:var(--accent);">${j.title || ''}</a></td>
+                <td>${j.score != null ? j.score : '-'}</td>
+                <td><span class="badge ${badgeClass(j.status)}">${j.status || '-'}</span></td>
+            </tr>`;
+        }
+        html += '</table>';
+        el.innerHTML = html;
+    } catch (e) {}
+}
+
+async function loadApplications() {
+    try {
+        const res = await fetch('/api/my/applications', {headers});
+        const apps = await res.json();
+        const el = document.getElementById('apps-list');
+        if (!apps.length) { el.innerHTML = '<div class="card" style="color:var(--muted);">No applications yet.</div>'; return; }
+
+        let html = '<table><tr><th>Company</th><th>Role</th><th>Status</th><th>Submitted</th></tr>';
+        for (const a of apps) {
+            html += `<tr>
+                <td>${a.company || ''}</td>
+                <td>${a.title || ''}</td>
+                <td><span class="badge ${badgeClass(a.state)}">${a.state || '-'}</span></td>
+                <td>${a.submitted_at ? new Date(a.submitted_at).toLocaleDateString() : '-'}</td>
+            </tr>`;
+        }
+        html += '</table>';
+        el.innerHTML = html;
+    } catch (e) {}
+}
+
+function logout() {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    document.cookie = 'access_token=;path=/;max-age=0';
+    window.location.href = '/login';
+}
+
+loadDashboard();
+</script>
+</body>
+</html>

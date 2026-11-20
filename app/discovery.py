@@ -311,6 +311,7 @@ def _check_profile_gate(match: dict, profile) -> str | None:
 def _send_first_approval(db: Session, job: Job, application: Application) -> dict:
     from app.approval import create_approval, ApprovalChannel
     from app.whatsapp import WhatsAppClient
+    from app.models import User
 
     channel = ApprovalChannel.WHATSAPP
     client = WhatsAppClient()
@@ -319,9 +320,18 @@ def _send_first_approval(db: Session, job: Job, application: Application) -> dic
 
     approval, token = create_approval(db, application, job, channel=channel)
 
-    if client.configured:
+    recipient = None
+    if job.user_id:
+        user = db.query(User).filter(User.id == job.user_id).first()
+        if user:
+            recipient = user.whatsapp_number or user.phone
+    if not recipient:
+        recipient = settings.whatsapp_recipient
+
+    if client.configured and recipient:
         try:
             result = client.send_approval_message_sync(
+                to=recipient,
                 company=job.company,
                 role=job.title,
                 location=job.location or "",

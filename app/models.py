@@ -71,10 +71,44 @@ def _utcnow():
     return datetime.now(timezone.utc)
 
 
+# ---------------------------------------------------------------------------
+# User model — multi-user auth with phone + OTP
+# ---------------------------------------------------------------------------
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    phone = Column(String(20), nullable=False, unique=True, index=True)
+    name = Column(String(200), nullable=False)
+    email = Column(String(200), nullable=True)
+    whatsapp_number = Column(String(20), nullable=True)
+    is_verified = Column(Boolean, default=False, nullable=False)
+    otp_code = Column(String(6), nullable=True)
+    otp_expires_at = Column(DateTime(timezone=True), nullable=True)
+    otp_attempts = Column(Integer, default=0, nullable=False)
+    resume_path = Column(String(500), nullable=True)
+    resume_text = Column(Text, nullable=True)
+    resume_checksum = Column(String(64), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    last_login_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    jobs = relationship("Job", back_populates="user")
+    applications = relationship("Application", back_populates="user")
+    profiles = relationship("CandidateProfile", back_populates="user")
+
+
+# ---------------------------------------------------------------------------
+# Job model
+# ---------------------------------------------------------------------------
+
 class Job(Base):
     __tablename__ = "jobs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     canonical_url = Column(String(2048), nullable=False, index=True)
     discovery_url = Column(String(2048), nullable=True)
     discovery_source = Column(String(100), nullable=True)
@@ -123,11 +157,12 @@ class Job(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
+    user = relationship("User", back_populates="jobs")
     applications = relationship("Application", back_populates="job")
     events = relationship("Event", back_populates="job", foreign_keys="Event.entity_id")
 
     __table_args__ = (
-        UniqueConstraint("canonical_url", name="uq_job_canonical_url"),
+        UniqueConstraint("canonical_url", "user_id", name="uq_job_canonical_url_user"),
         Index("ix_job_company_title_hash", "company", "title", "description_hash"),
     )
 
@@ -136,6 +171,7 @@ class Application(Base):
     __tablename__ = "applications"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     job_id = Column(Integer, ForeignKey("jobs.id"), nullable=False)
     resume_variant = Column(String(500), nullable=True)
     answer_set_version = Column(String(100), nullable=True)
@@ -151,6 +187,7 @@ class Application(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
+    user = relationship("User", back_populates="applications")
     job = relationship("Job", back_populates="applications")
     approvals = relationship("Approval", back_populates="application")
 
@@ -218,7 +255,8 @@ class CandidateProfile(Base):
     __tablename__ = "candidate_profiles"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    resume_checksum = Column(String(64), nullable=False, unique=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    resume_checksum = Column(String(64), nullable=False)
     name = Column(String(200), nullable=False)
     email = Column(String(200), nullable=True)
     phone = Column(String(50), nullable=True)
@@ -238,11 +276,18 @@ class CandidateProfile(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
+    user = relationship("User", back_populates="profiles")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "resume_checksum", name="uq_profile_user_checksum"),
+    )
+
 
 class SourceRun(Base):
     __tablename__ = "source_runs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     source = Column(String(100), nullable=False)
     started_at = Column(DateTime(timezone=True), default=_utcnow)
     ended_at = Column(DateTime(timezone=True), nullable=True)

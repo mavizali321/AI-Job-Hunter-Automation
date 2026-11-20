@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     api_base_url: str = "http://127.0.0.1:8000"
     worker_poll_seconds: int = 15
     applications_dir: str = "./applications"
+    uploads_dir: str = "./uploads"
 
     search_window_days: int = 7
     approval_threshold: int = 80

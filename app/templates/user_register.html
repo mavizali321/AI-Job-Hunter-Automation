@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Register — AI Job Hunter</title>
+<style>
+:root { --bg: #0f172a; --card: #1e293b; --accent: #3b82f6; --text: #f1f5f9; --muted: #94a3b8; --border: #334155; --error: #ef4444; --success: #22c55e; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 24px; }
+.box { background: var(--card); padding: 32px; border-radius: 16px; width: 380px; }
+h1 { font-size: 1.5em; margin-bottom: 8px; text-align: center; }
+.subtitle { color: var(--muted); text-align: center; margin-bottom: 24px; font-size: 0.9em; }
+label { display: block; margin-bottom: 4px; font-size: 0.85em; color: var(--muted); }
+input { width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 16px; background: var(--bg); color: var(--text); font-size: 1em; }
+input:focus { outline: none; border-color: var(--accent); }
+button { width: 100%; padding: 12px; background: var(--accent); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 1em; font-weight: 600; }
+button:hover { opacity: 0.9; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+.msg { padding: 10px; border-radius: 8px; margin-bottom: 16px; font-size: 0.9em; display: none; }
+.msg-error { background: #fee2e2; color: var(--error); display: block; }
+.msg-success { background: #dcfce7; color: var(--success); display: block; }
+.link { text-align: center; margin-top: 16px; font-size: 0.9em; }
+.link a { color: var(--accent); text-decoration: none; }
+#otp-section { display: none; }
+</style>
+</head>
+<body>
+<div class="box">
+    <h1>Create Account</h1>
+    <p class="subtitle">Register with your mobile number</p>
+
+    <div id="msg" class="msg"></div>
+
+    <div id="register-section">
+        <label>Full Name</label>
+        <input type="text" id="name" placeholder="Your full name" required>
+        <label>Mobile Number (with country code)</label>
+        <input type="tel" id="phone" placeholder="+923361321040" required>
+        <label>Email (optional)</label>
+        <input type="email" id="email" placeholder="you@example.com">
+        <button onclick="register()">Send OTP to WhatsApp</button>
+    </div>
+
+    <div id="otp-section">
+        <label>Enter 6-digit OTP from WhatsApp</label>
+        <input type="text" id="otp" placeholder="123456" maxlength="6" pattern="[0-9]{6}">
+        <button onclick="verifyOtp()">Verify & Create Account</button>
+        <p style="text-align:center;margin-top:12px;font-size:0.85em;color:var(--muted);">
+            <a href="#" onclick="resendOtp()" style="color:var(--accent);text-decoration:none;">Resend OTP</a>
+        </p>
+    </div>
+
+    <div class="link">Already have an account? <a href="/login">Login</a></div>
+</div>
+
+<script>
+let userPhone = '';
+
+async function register() {
+    const name = document.getElementById('name').value.trim();
+    const phone = document.getElementById('phone').value.trim();
+    const email = document.getElementById('email').value.trim();
+    const msg = document.getElementById('msg');
+
+    if (!name || !phone) { showMsg('Name and phone are required', 'error'); return; }
+
+    try {
+        const res = await fetch('/api/auth/register', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({phone, name, email})
+        });
+        const data = await res.json();
+        if (!res.ok) { showMsg(data.detail || 'Registration failed', 'error'); return; }
+
+        userPhone = data.phone;
+        document.getElementById('register-section').style.display = 'none';
+        document.getElementById('otp-section').style.display = 'block';
+
+        let m = 'OTP sent to your WhatsApp!';
+        if (data.otp_debug) m += ' (Dev mode OTP: ' + data.otp_debug + ')';
+        showMsg(m, 'success');
+    } catch (e) { showMsg('Network error', 'error'); }
+}
+
+async function verifyOtp() {
+    const otp = document.getElementById('otp').value.trim();
+    if (!otp || otp.length !== 6) { showMsg('Enter 6-digit OTP', 'error'); return; }
+
+    try {
+        const res = await fetch('/api/auth/verify-otp', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({phone: userPhone, otp})
+        });
+        const data = await res.json();
+        if (!res.ok) { showMsg(data.detail || 'Verification failed', 'error'); return; }
+
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('user', JSON.stringify(data.user));
+        document.cookie = 'access_token=' + data.token + ';path=/;max-age=259200';
+        showMsg('Verified! Redirecting...', 'success');
+        setTimeout(() => window.location.href = '/dashboard', 1000);
+    } catch (e) { showMsg('Network error', 'error'); }
+}
+
+async function resendOtp() {
+    try {
+        const res = await fetch('/api/auth/resend-otp', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({phone: userPhone})
+        });
+        const data = await res.json();
+        if (!res.ok) { showMsg(data.detail || 'Failed', 'error'); return; }
+        let m = 'New OTP sent!';
+        if (data.otp_debug) m += ' (Dev mode OTP: ' + data.otp_debug + ')';
+        showMsg(m, 'success');
+    } catch (e) { showMsg('Network error', 'error'); }
+}
+
+function showMsg(text, type) {
+    const el = document.getElementById('msg');
+    el.textContent = text;
+    el.className = 'msg msg-' + type;
+}
+</script>
+</body>
+</html>

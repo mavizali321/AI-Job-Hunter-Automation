@@ -57,9 +57,64 @@ class TestHealth:
         resp = client.get("/login")
         assert resp.status_code == 200
 
-    def test_dashboard_requires_auth(self):
-        resp = client.get("/dashboard", follow_redirects=False)
+    def test_register_page(self):
+        resp = client.get("/register")
+        assert resp.status_code == 200
+
+    def test_home_page(self):
+        resp = client.get("/")
+        assert resp.status_code == 200
+
+    def test_dashboard_page_loads(self):
+        resp = client.get("/dashboard")
+        assert resp.status_code == 200
+
+    def test_admin_dashboard_requires_auth(self):
+        resp = client.get("/admin/dashboard", follow_redirects=False)
         assert resp.status_code in (401, 403, 307)
+
+
+class TestAuth:
+    def test_register_and_verify(self):
+        resp = client.post("/api/auth/register", json={
+            "phone": "+923001234567",
+            "name": "Test User",
+            "email": "test@example.com",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "otp_sent"
+        assert data["phone"] == "+923001234567"
+        otp = data.get("otp_debug")
+        assert otp is not None
+
+        resp2 = client.post("/api/auth/verify-otp", json={
+            "phone": "+923001234567",
+            "otp": otp,
+        })
+        assert resp2.status_code == 200
+        data2 = resp2.json()
+        assert data2["status"] == "verified"
+        assert "token" in data2
+        assert data2["user"]["name"] == "Test User"
+
+    def test_register_duplicate_verified(self):
+        client.post("/api/auth/register", json={"phone": "+923009999999", "name": "Dupe"})
+        resp = client.post("/api/auth/register", json={"phone": "+923009999999", "name": "Dupe"})
+        data = resp.json()
+        assert data["status"] == "otp_sent"
+
+    def test_verify_wrong_otp(self):
+        client.post("/api/auth/register", json={"phone": "+923008888888", "name": "Wrong"})
+        resp = client.post("/api/auth/verify-otp", json={
+            "phone": "+923008888888",
+            "otp": "000000",
+        })
+        assert resp.status_code == 400
+
+    def test_me_requires_auth(self):
+        resp = client.get("/api/me")
+        assert resp.status_code == 401
 
 
 class TestWhatsAppWebhook:
@@ -98,12 +153,11 @@ class TestDiscoveryEndpoint:
         assert resp.status_code == 401
 
     def test_run_endpoint_returns_discovery_result(self):
-        from app.config import settings
         from itsdangerous import URLSafeTimedSerializer
         signer = URLSafeTimedSerializer(settings.secret_key)
         token = signer.dumps({"user": "admin"})
         with patch("app.main.run_orchestrator", return_value={"status": "COMPLETED", "discovered": 0, "ingested": 0}):
-            resp = client.post("/api/run", cookies={"auth": token})
+            resp = client.post("/api/run", cookies={"admin_auth": token})
             assert resp.status_code == 200
             data = resp.json()
             assert data["status"] == "ok"
@@ -111,11 +165,10 @@ class TestDiscoveryEndpoint:
             assert data["discovery"]["status"] == "COMPLETED"
 
     def test_csv_import_endpoint(self):
-        from app.config import settings
         from itsdangerous import URLSafeTimedSerializer
         signer = URLSafeTimedSerializer(settings.secret_key)
         token = signer.dumps({"user": "admin"})
-        resp = client.post("/api/csv-import", cookies={"auth": token})
+        resp = client.post("/api/csv-import", cookies={"admin_auth": token})
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ok"

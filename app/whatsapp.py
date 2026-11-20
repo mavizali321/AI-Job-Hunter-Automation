@@ -1,4 +1,4 @@
-"""WhatsApp Cloud API client for approval messages and webhook handling."""
+"""WhatsApp Cloud API client for OTP, approval messages, and webhook handling."""
 
 import hashlib
 import hmac
@@ -17,12 +17,62 @@ class WhatsAppClient:
     def __init__(self):
         self.phone_number_id = settings.whatsapp_phone_number_id
         self.access_token = settings.whatsapp_access_token
-        self.recipient = settings.whatsapp_recipient
         self.verify_token = settings.whatsapp_verify_token
 
     @property
     def configured(self) -> bool:
-        return bool(self.phone_number_id and self.access_token and self.recipient)
+        return bool(self.phone_number_id and self.access_token)
+
+    def _send_text_sync(self, to: str, body: str) -> dict:
+        if not self.configured:
+            return {"status": "skipped", "reason": "WhatsApp not configured"}
+
+        with httpx.Client() as client:
+            response = client.post(
+                f"{WHATSAPP_API_URL}/{self.phone_number_id}/messages",
+                headers={
+                    "Authorization": f"Bearer {self.access_token}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "messaging_product": "whatsapp",
+                    "to": to,
+                    "type": "text",
+                    "text": {"body": body},
+                },
+                timeout=30,
+            )
+            return response.json()
+
+    async def _send_text(self, to: str, body: str) -> dict:
+        if not self.configured:
+            return {"status": "skipped", "reason": "WhatsApp not configured"}
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{WHATSAPP_API_URL}/{self.phone_number_id}/messages",
+                headers={
+                    "Authorization": f"Bearer {self.access_token}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "messaging_product": "whatsapp",
+                    "to": to,
+                    "type": "text",
+                    "text": {"body": body},
+                },
+                timeout=30,
+            )
+            return response.json()
+
+    def send_otp(self, to: str, otp: str) -> dict:
+        body = (
+            f"*AI Job Hunter - Verification*\n\n"
+            f"Your OTP code is: *{otp}*\n\n"
+            f"This code expires in 10 minutes.\n"
+            f"Do not share this code with anyone."
+        )
+        return self._send_text_sync(to, body)
 
     def _build_approval_body(
         self,
@@ -69,6 +119,7 @@ class WhatsAppClient:
 
     async def send_approval_message(
         self,
+        to: str,
         company: str,
         role: str,
         location: str,
@@ -79,54 +130,36 @@ class WhatsAppClient:
         approval_type: str = "first",
         manifest_hash: str | None = None,
     ) -> dict:
-        if not self.configured:
-            return {"status": "skipped", "reason": "WhatsApp not configured"}
+        body = self._build_approval_body(
+            company=company, role=role, location=location, score=score,
+            salary=salary, url=url, ref_code=ref_code,
+            approval_type=approval_type, manifest_hash=manifest_hash,
+        )
+        return await self._send_text(to, body)
+
+    def send_approval_message_sync(
+        self,
+        to: str | None = None,
+        company: str = "",
+        role: str = "",
+        location: str = "",
+        score: float = 0,
+        url: str = "",
+        ref_code: str = "",
+        salary: str | None = None,
+        approval_type: str = "first",
+        manifest_hash: str | None = None,
+    ) -> dict:
+        recipient = to or settings.whatsapp_recipient
+        if not recipient:
+            return {"status": "skipped", "reason": "No recipient"}
 
         body = self._build_approval_body(
             company=company, role=role, location=location, score=score,
             salary=salary, url=url, ref_code=ref_code,
             approval_type=approval_type, manifest_hash=manifest_hash,
         )
-
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{WHATSAPP_API_URL}/{self.phone_number_id}/messages",
-                headers={
-                    "Authorization": f"Bearer {self.access_token}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "messaging_product": "whatsapp",
-                    "to": self.recipient,
-                    "type": "text",
-                    "text": {"body": body},
-                },
-                timeout=30,
-            )
-            return response.json()
-
-    def send_approval_message_sync(self, **kwargs) -> dict:
-        if not self.configured:
-            return {"status": "skipped", "reason": "WhatsApp not configured"}
-
-        body = self._build_approval_body(**kwargs)
-
-        with httpx.Client() as client:
-            response = client.post(
-                f"{WHATSAPP_API_URL}/{self.phone_number_id}/messages",
-                headers={
-                    "Authorization": f"Bearer {self.access_token}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "messaging_product": "whatsapp",
-                    "to": self.recipient,
-                    "type": "text",
-                    "text": {"body": body},
-                },
-                timeout=30,
-            )
-            return response.json()
+        return self._send_text_sync(recipient, body)
 
     @staticmethod
     def verify_webhook_signature(payload: bytes, signature: str, app_secret: str) -> bool:
@@ -154,7 +187,6 @@ class WhatsAppClient:
 
     @staticmethod
     def parse_approval_response(text: str) -> tuple[str | None, str | None]:
-        """Parse approval response. Returns (decision, ref_code)."""
         parts = text.strip().split()
         if not parts:
             return None, None

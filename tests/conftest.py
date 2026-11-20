@@ -23,7 +23,7 @@ if sys.platform == "win32":
     _pathlib.cleanup_dead_symlinks = _safe_cleanup
 
 from app.database import Base, get_db
-from app.models import Job, Application, Approval, CandidateAnswer, CandidateProfile, Event, SourceRun, SubmissionNonce  # noqa
+from app.models import Job, Application, Approval, CandidateAnswer, CandidateProfile, Event, SourceRun, SubmissionNonce, User  # noqa
 
 
 @pytest.fixture

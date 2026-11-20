@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Admin Dashboard{% endblock %}
+{% block content %}
+<h1>Admin Dashboard</h1>
+<div class="grid">
+    <div class="card stat"><div class="num">{{ total_users }}</div><div class="label">Total Users</div></div>
+    <div class="card stat"><div class="num">{{ verified_users }}</div><div class="label">Verified Users</div></div>
+    <div class="card stat"><div class="num">{{ total_jobs }}</div><div class="label">Total Jobs</div></div>
+    <div class="card stat"><div class="num">{{ total_apps }}</div><div class="label">Applications</div></div>
+</div>
+
+{% if by_status %}
+<div class="card">
+<h2>Jobs by Status</h2>
+<table>
+<tr><th>Status</th><th>Count</th></tr>
+{% for status, count in by_status.items() %}
+<tr><td>{{ status }}</td><td>{{ count }}</td></tr>
+{% endfor %}
+</table>
+</div>
+{% endif %}
+
+{% if pending_approvals %}
+<div class="card">
+<h2>Pending Approvals</h2>
+<table>
+<tr><th>Ref</th><th>Type</th><th>Created</th><th>Actions</th></tr>
+{% for a in pending_approvals %}
+<tr>
+<td>{{ a.approval_ref_code }}</td>
+<td><span class="badge badge-yellow">{{ a.approval_type.value }}</span></td>
+<td>{{ a.created_at.strftime('%Y-%m-%d %H:%M') if a.created_at else '-' }}</td>
+<td>
+    <form method="post" action="/api/approve-ref/{{ a.approval_ref_code }}" style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="btn btn-success" type="submit" style="padding:4px 12px;font-size:0.8em;">Approve</button>
+    </form>
+    <form method="post" action="/api/reject-ref/{{ a.approval_ref_code }}" style="display:inline;margin-left:4px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="btn btn-danger" type="submit" style="padding:4px 12px;font-size:0.8em;">Reject</button>
+    </form>
+</td>
+</tr>
+{% endfor %}
+</table>
+</div>
+{% endif %}
+
+{% if recent_events %}
+<div class="card">
+<h2>Recent Events</h2>
+<table>
+<tr><th>Time</th><th>Entity</th><th>Action</th><th>State</th></tr>
+{% for e in recent_events %}
+<tr>
+<td>{{ e.timestamp.strftime('%H:%M:%S') if e.timestamp else '-' }}</td>
+<td>{{ e.entity }}</td>
+<td>{{ e.action }}</td>
+<td>{{ e.new_state or '-' }}</td>
+</tr>
+{% endfor %}
+</table>
+</div>
+{% endif %}
+
+{% if last_run %}
+<div class="card">
+<h2>Last Source Run</h2>
+<p>Status: <span class="badge badge-{{ 'green' if last_run.status == 'COMPLETED' else 'red' }}">{{ last_run.status }}</span></p>
+<p>Jobs found: {{ last_run.jobs_found }}, New: {{ last_run.jobs_new }}</p>
+<p>Started: {{ last_run.started_at.strftime('%Y-%m-%d %H:%M') if last_run.started_at else '-' }}</p>
+</div>
+{% endif %}
+{% endblock %}

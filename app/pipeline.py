@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 from sqlalchemy.orm import Session
 
-from app.models import Job, Application, JobStatus, canonicalize_url, content_hash
+from app.models import Job, Application, JobStatus, User, canonicalize_url, content_hash
 from app.scoring import score_job
 from app.state_machine import transition_job
 from app.config import settings
@@ -33,6 +33,7 @@ def ingest_discovered_job(
     company: str,
     url: str,
     source: str,
+    user_id: int | None = None,
     location: str = "",
     remote_policy: str = "",
     description: str = "",
@@ -47,18 +48,23 @@ def ingest_discovered_job(
 
     existing = None
     if canonical:
-        existing = db.query(Job).filter(Job.canonical_url == canonical).first()
+        q = db.query(Job).filter(Job.canonical_url == canonical)
+        if user_id is not None:
+            q = q.filter(Job.user_id == user_id)
+        existing = q.first()
     if not existing:
-        existing = (
-            db.query(Job)
-            .filter(Job.company == company, Job.title == title, Job.description_hash == desc_hash)
-            .first()
+        q = db.query(Job).filter(
+            Job.company == company, Job.title == title, Job.description_hash == desc_hash,
         )
+        if user_id is not None:
+            q = q.filter(Job.user_id == user_id)
+        existing = q.first()
 
     if existing:
         return None
 
     job = Job(
+        user_id=user_id,
         canonical_url=canonical or f"discovered-{desc_hash}",
         source=source,
         external_id=external_id,
@@ -259,9 +265,18 @@ def create_application_for_shortlisted(db: Session, job: Job) -> Application | N
     if existing:
         return existing
 
+    user = None
+    if job.user_id:
+        user = db.query(User).filter(User.id == job.user_id).first()
+
+    resume_path = "profile/Maviz-Ali-Resume-Original.pdf"
+    if user and user.resume_path:
+        resume_path = user.resume_path
+
     application = Application(
+        user_id=job.user_id,
         job_id=job.id,
-        resume_variant="profile/Maviz-Ali-Resume-Original.pdf",
+        resume_variant=resume_path,
         state=JobStatus.WAITING_APPROVAL,
     )
     db.add(application)
@@ -323,17 +338,34 @@ def prepare_application(db: Session, job: Job, application: Application) -> Path
     }
     (app_dir / "job_snapshot.json").write_text(json.dumps(snapshot, indent=2))
 
-    resume_src = Path("profile/Maviz-Ali-Resume-Original.pdf")
+    user = None
+    if job.user_id:
+        user = db.query(User).filter(User.id == job.user_id).first()
+
+    resume_src = Path(user.resume_path) if user and user.resume_path else Path("profile/Maviz-Ali-Resume-Original.pdf")
     if resume_src.exists():
         shutil.copy2(resume_src, app_dir / "resume.pdf")
 
-    answers = {
-        "full_name": "Maviz Ali",
-        "email": "maviz.ali92@gmail.com",
-        "phone": "+92 336 1321040",
-        "linkedin": "linkedin.com/in/mavizali",
-        "resume": str(app_dir / "resume.pdf"),
-    }
+    if user:
+        profile = db.query(
+            __import__("app.models", fromlist=["CandidateProfile"]).CandidateProfile
+        ).filter_by(user_id=user.id).first()
+        answers = {
+            "full_name": user.name,
+            "email": user.email or "",
+            "phone": user.phone,
+            "linkedin": profile.linkedin if profile else "",
+            "resume": str(app_dir / "resume.pdf"),
+        }
+    else:
+        answers = {
+            "full_name": "Maviz Ali",
+            "email": "maviz.ali92@gmail.com",
+            "phone": "+92 336 1321040",
+            "linkedin": "linkedin.com/in/mavizali",
+            "resume": str(app_dir / "resume.pdf"),
+        }
+
     application.answer_set_version = content_hash(json.dumps(answers, sort_keys=True))
     (app_dir / "answers.json").write_text(json.dumps(answers, indent=2))
 
@@ -351,7 +383,6 @@ def prepare_application(db: Session, job: Job, application: Application) -> Path
 
 
 def _send_final_approval(db: Session, job: Job, application: Application, snapshot: dict, answers: dict) -> dict:
-    """Auto-create second (final) approval after preparation and send WhatsApp."""
     from app.approval import create_final_approval, ApprovalChannel
     from app.whatsapp import WhatsAppClient
     from local_worker.worker import SubmissionGuard
@@ -366,9 +397,16 @@ def _send_final_approval(db: Session, job: Job, application: Application, snapsh
 
     approval, token = create_final_approval(db, application, job, manifest_hash, channel=channel)
 
-    if client.configured:
+    recipient = None
+    if job.user_id:
+        user = db.query(User).filter(User.id == job.user_id).first()
+        if user:
+            recipient = user.whatsapp_number or user.phone
+
+    if client.configured and recipient:
         try:
             result = client.send_approval_message_sync(
+                to=recipient,
                 company=job.company,
                 role=job.title,
                 location=job.location or "",

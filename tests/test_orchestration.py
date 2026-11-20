@@ -284,7 +284,7 @@ class TestCeleryFailureVisibility:
             resp = client.post(
                 f"/api/retry-prepare/{job.id}",
                 data={"csrf_token": csrf},
-                cookies={"auth": auth, "csrf_token": csrf},
+                cookies={"admin_auth": auth, "csrf_token": csrf},
                 follow_redirects=False,
             )
             assert resp.status_code == 303
